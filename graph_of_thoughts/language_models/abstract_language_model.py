@@ -6,11 +6,11 @@
 #
 # main author: Nils Blach
 
-from abc import ABC, abstractmethod
-from typing import List, Dict, Union, Any
 import json
-import os
 import logging
+import os
+from abc import ABC, abstractmethod
+from typing import Any, Dict, List, Union
 
 
 class AbstractLanguageModel(ABC):
@@ -69,6 +69,20 @@ class AbstractLanguageModel(ABC):
     def query(self, query: str, num_responses: int = 1) -> Any:
         """
         Abstract method to query the language model.
+
+        :param query: The query to be posed to the language model.
+        :type query: str
+        :param num_responses: The number of desired responses.
+        :type num_responses: int
+        :return: The language model's response(s).
+        :rtype: Any
+        """
+        pass
+
+    @abstractmethod
+    async def aquery(self, query: str, num_responses: int = 1) -> Any:
+        """
+        Abstract method to asynchronously query the language model.
 
         :param query: The query to be posed to the language model.
         :type query: str

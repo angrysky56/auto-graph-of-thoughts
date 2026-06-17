@@ -6,17 +6,24 @@
 #
 # main author: Nils Blach
 
-from __future__ import annotations
-import logging
-from enum import Enum
-from typing import List, Iterator, Dict, Callable, Union
-from abc import ABC, abstractmethod
-import itertools
+"""
+This module defines the Operation base class and all its concrete implementations
+(e.g., Score, Generate, Improve, Aggregate) that form the Graph of Operations.
+"""
 
-from graph_of_thoughts.operations.thought import Thought
+from __future__ import annotations
+
+import asyncio
+import itertools
+import logging
+from abc import ABC, abstractmethod
+from enum import Enum
+from typing import Callable, Dict, Iterator, List, Union
+
 from graph_of_thoughts.language_models import AbstractLanguageModel
-from graph_of_thoughts.prompter import Prompter
+from graph_of_thoughts.operations.thought import Thought
 from graph_of_thoughts.parser import Parser
+from graph_of_thoughts.prompter import Prompter
 
 
 class OperationType(Enum):
@@ -24,15 +31,15 @@ class OperationType(Enum):
     Enum to represent different operation types that can be used as unique identifiers.
     """
 
-    score: int = 0
-    validate_and_improve: int = 1
-    generate: int = 2
-    improve: int = 3
-    aggregate: int = 4
-    keep_best_n: int = 5
-    keep_valid: int = 6
-    ground_truth_evaluator: int = 7
-    selector: int = 8
+    SCORE = 0
+    VALIDATE_AND_IMPROVE = 1
+    GENERATE = 2
+    IMPROVE = 3
+    AGGREGATE = 4
+    KEEP_BEST_N = 5
+    KEEP_VALID = 6
+    GROUND_TRUTH_EVALUATOR = 7
+    SELECTOR = 8
 
 
 class Operation(ABC):
@@ -46,7 +53,8 @@ class Operation(ABC):
 
     def __init__(self) -> None:
         """
-        Initializes a new Operation instance with a unique id, and empty predecessors and successors.
+        Initializes a new Operation instance with a unique id, and empty predecessors
+        and successors.
         """
         self.logger: logging.Logger = logging.getLogger(self.__class__.__name__)
         self.id: int = next(Operation._ids)
@@ -113,12 +121,43 @@ class Operation(ABC):
         :param kwargs: Additional parameters for execution.
         :raises AssertionError: If not all predecessors have been executed.
         """
-        assert self.can_be_executed(), "Not all predecessors have been executed"
+        if not self.can_be_executed():
+            raise AssertionError("Not all predecessors have been executed")
         self.logger.info(
             "Executing operation %d of type %s", self.id, self.operation_type
         )
         self._execute(lm, prompter, parser, **kwargs)
         self.logger.debug("Operation %d executed", self.id)
+        self.executed = True
+
+    async def execute_async(
+        self, lm: AbstractLanguageModel, prompter: Prompter, parser: Parser, **kwargs
+    ) -> None:
+        """
+        Execute the operation asynchronously, assuring that all predecessors have been executed.
+        Delegates to _execute_async if defined, otherwise runs _execute in a thread pool.
+
+        :param lm: The language model to be used.
+        :type lm: AbstractLanguageModel
+        :param prompter: The prompter for crafting prompts.
+        :type prompter: Prompter
+        :param parser: The parser for parsing responses.
+        :type parser: Parser
+        :param kwargs: Additional parameters for execution.
+        :raises AssertionError: If not all predecessors have been executed.
+        """
+        if not self.can_be_executed():
+            raise AssertionError("Not all predecessors have been executed")
+        self.logger.info(
+            "Executing operation %d of type %s asynchronously",
+            self.id,
+            self.operation_type,
+        )
+        if hasattr(self, "_execute_async"):
+            await self._execute_async(lm, prompter, parser, **kwargs)
+        else:
+            await asyncio.to_thread(self._execute, lm, prompter, parser, **kwargs)
+        self.logger.debug("Operation %d executed asynchronously", self.id)
         self.executed = True
 
     @abstractmethod
@@ -137,7 +176,6 @@ class Operation(ABC):
         :type parser: Parser
         :param kwargs: Additional parameters for execution.
         """
-        pass
 
     @abstractmethod
     def get_thoughts(self) -> List[Thought]:
@@ -148,7 +186,6 @@ class Operation(ABC):
         :return: List of associated thoughts.
         :rtype: List[Thought]
         """
-        pass
 
 
 class Score(Operation):
@@ -156,7 +193,7 @@ class Score(Operation):
     Operation to score thoughts.
     """
 
-    operation_type: OperationType = OperationType.score
+    operation_type: OperationType = OperationType.SCORE
 
     def __init__(
         self,
@@ -171,7 +208,8 @@ class Score(Operation):
 
         :param num_samples: Number of samples to use for scoring. Defaults to 1.
         :type num_samples: int
-        :param combined_scoring: Whether to score all thoughts together or individually. Defaults to False.
+        :param combined_scoring: Whether to score all thoughts together or individually.
+                                 Defaults to False.
         :type combined_scoring: bool
         :param scoring_function: A function to score thoughts (if not using LM). Defaults to None.
         :type scoring_function: Takes a list of thought states or a single thought state and
@@ -213,9 +251,8 @@ class Score(Operation):
         """
         previous_thoughts: List[Thought] = self.get_previous_thoughts()
 
-        assert (
-            len(self.predecessors) > 0
-        ), "Score operation needs at least one predecessor"
+        if len(self.predecessors) <= 0:
+            raise AssertionError("Score operation needs at least one predecessor")
 
         if self.combined_scoring:
             previous_thoughts_states = [thought.state for thought in previous_thoughts]
@@ -233,7 +270,7 @@ class Score(Operation):
                 )
                 self.logger.debug("Responses from LM: %s", responses)
                 scores = parser.parse_score_answer(previous_thoughts_states, responses)
-            for thought, score in zip(previous_thoughts, scores):
+            for thought, score in zip(previous_thoughts, scores, strict=False):
                 new_thought = Thought.from_thought(thought)
                 new_thought.score = score
                 self.thoughts.append(new_thought)
@@ -265,13 +302,72 @@ class Score(Operation):
             len(self.thoughts),
         )
 
+    async def _execute_async(
+        self, lm: AbstractLanguageModel, prompter: Prompter, parser: Parser, **_kwargs
+    ) -> None:
+        """
+        Executes the scoring operation asynchronously by scoring the thoughts from the predecessors.
+        """
+        previous_thoughts: List[Thought] = self.get_previous_thoughts()
+
+        if len(self.predecessors) <= 0:
+            raise AssertionError("Score operation needs at least one predecessor")
+
+        if self.combined_scoring:
+            previous_thoughts_states = [thought.state for thought in previous_thoughts]
+            if self.scoring_function is not None:
+                self.logger.debug(
+                    "Using scoring function %s to score states", self.scoring_function
+                )
+                scores = self.scoring_function(previous_thoughts_states)
+            else:
+                prompt = prompter.score_prompt(previous_thoughts_states)
+                self.logger.debug("Prompt for LM: %s", prompt)
+
+                responses = lm.get_response_texts(
+                    await lm.aquery(prompt, num_responses=self.num_samples)
+                )
+                self.logger.debug("Responses from LM: %s", responses)
+                scores = parser.parse_score_answer(previous_thoughts_states, responses)
+            for thought, score in zip(previous_thoughts, scores, strict=False):
+                new_thought = Thought.from_thought(thought)
+                new_thought.score = score
+                self.thoughts.append(new_thought)
+        else:
+            for thought in previous_thoughts:
+                new_thought = Thought.from_thought(thought)
+                if self.scoring_function is not None:
+                    self.logger.debug(
+                        "Using scoring function %s to score state",
+                        self.scoring_function,
+                    )
+                    score = self.scoring_function(thought.state)
+                else:
+                    prompt = prompter.score_prompt([thought.state])
+                    self.logger.debug("Prompt for LM: %s", prompt)
+
+                    responses = lm.get_response_texts(
+                        await lm.aquery(prompt, num_responses=self.num_samples)
+                    )
+                    self.logger.debug("Responses from LM: %s", responses)
+                    score = parser.parse_score_answer([thought.state], responses)[0]
+
+                new_thought.score = score
+                self.thoughts.append(new_thought)
+
+        self.logger.info(
+            "Score operation %d scored %d thoughts",
+            self.id,
+            len(self.thoughts),
+        )
+
 
 class ValidateAndImprove(Operation):
     """
     Operation to validate and improve thoughts.
     """
 
-    operation_type: OperationType = OperationType.validate_and_improve
+    operation_type: OperationType = OperationType.VALIDATE_AND_IMPROVE
 
     def __init__(
         self,
@@ -289,7 +385,8 @@ class ValidateAndImprove(Operation):
         :type improve: bool
         :param num_tries: Number of tries to improve the thought before giving up. Defaults to 3.
         :type num_tries: int
-        :param validate_function: A function to validate thoughts (if not using LM). Defaults to None.
+        :param validate_function: A function to validate thoughts (if not using LM).
+                                  Defaults to None.
         :type validate_function: Takes a thought state and returns a boolean.
         """
         super().__init__()
@@ -312,7 +409,8 @@ class ValidateAndImprove(Operation):
         self, lm: AbstractLanguageModel, prompter: Prompter, parser: Parser, **kwargs
     ) -> None:
         """
-        Executes the ValidateAndImprove operation by validating and improving the predecessors' thoughts.
+        Executes the ValidateAndImprove operation by validating and improving the
+        predecessors' thoughts.
         If a validation function is provided, it is used, otherwise the LM is prompted.
         If improvement is enabled, the LM is prompted to improve the thought, if it is not valid.
 
@@ -327,9 +425,10 @@ class ValidateAndImprove(Operation):
         """
         previous_thoughts: List[Thought] = self.get_previous_thoughts()
 
-        assert (
-            len(self.predecessors) > 0
-        ), "ValidateAndImprove operation needs at least one predecessor"
+        if len(self.predecessors) <= 0:
+            raise AssertionError(
+                "ValidateAndImprove operation needs at least one predecessor"
+            )
 
         for thought in previous_thoughts:
             thought_list = []
@@ -387,13 +486,82 @@ class ValidateAndImprove(Operation):
             len(previous_thoughts),
         )
 
+    async def _execute_async(
+        self, lm: AbstractLanguageModel, prompter: Prompter, parser: Parser, **_kwargs
+    ) -> None:
+        """
+        Executes the ValidateAndImprove operation asynchronously.
+        """
+        previous_thoughts: List[Thought] = self.get_previous_thoughts()
+
+        if len(self.predecessors) <= 0:
+            raise AssertionError(
+                "ValidateAndImprove operation needs at least one predecessor"
+            )
+
+        for thought in previous_thoughts:
+            thought_list = []
+            current_thought = Thought.from_thought(thought)
+            current_try = 0
+            while True:
+                if self.validate_function is not None:
+                    self.logger.debug(
+                        "Using validate function %s to score states",
+                        self.validate_function,
+                    )
+                    valid = self.validate_function(current_thought.state)
+                else:
+                    prompt = prompter.validation_prompt(**current_thought.state)
+                    self.logger.debug("Prompt for LM: %s", prompt)
+                    responses = lm.get_response_texts(
+                        await lm.aquery(prompt, num_responses=self.num_samples)
+                    )
+                    self.logger.debug("Responses from LM: %s", responses)
+
+                    valid = parser.parse_validation_answer(
+                        current_thought.state, responses
+                    )
+                current_thought.valid = valid
+                thought_list.append(current_thought)
+                if (
+                    not self.improve
+                    or current_thought.valid
+                    or current_try >= self.num_tries
+                ):
+                    break
+                improve_prompt = prompter.improve_prompt(**current_thought.state)
+                self.logger.debug("Prompt for LM: %s", improve_prompt)
+                responses = lm.get_response_texts(
+                    await lm.aquery(improve_prompt, num_responses=1)
+                )
+                self.logger.debug("Responses from LM: %s", responses)
+                state_update = parser.parse_improve_answer(
+                    current_thought.state, responses
+                )
+                current_thought = Thought({**current_thought.state, **state_update})
+                current_try += 1
+            self.thoughts.append(thought_list)
+
+        self.logger.info(
+            "Validate and improve operation %d created %d valid thoughts from %d previous thoughts",
+            self.id,
+            len(
+                [
+                    thought_list[-1]
+                    for thought_list in self.thoughts
+                    if thought_list[-1].valid
+                ]
+            ),
+            len(previous_thoughts),
+        )
+
 
 class Generate(Operation):
     """
     Operation to generate thoughts.
     """
 
-    operation_type: OperationType = OperationType.generate
+    operation_type: OperationType = OperationType.GENERATE
 
     def __init__(
         self, num_branches_prompt: int = 1, num_branches_response: int = 1
@@ -401,9 +569,11 @@ class Generate(Operation):
         """
         Initializes a new Generate operation.
 
-        :param num_branches_prompt: Number of responses that each prompt should generate (passed to prompter). Defaults to 1.
+        :param num_branches_prompt: Number of responses that each prompt should generate
+                                    (passed to prompter). Defaults to 1.
         :type num_branches_prompt: int
-        :param num_branches_response: Number of responses the LM should generate for each prompt. Defaults to 1.
+        :param num_branches_response: Number of responses the LM should generate for
+                                      each prompt. Defaults to 1.
         :type num_branches_response: int
         """
         super().__init__()
@@ -476,13 +646,59 @@ class Generate(Operation):
             "Generate operation %d created %d new thoughts", self.id, len(self.thoughts)
         )
 
+    async def _execute_async(
+        self, lm: AbstractLanguageModel, prompter: Prompter, parser: Parser, **kwargs
+    ) -> None:
+        """
+        Executes the Generate operation asynchronously.
+        """
+        previous_thoughts: List[Thought] = self.get_previous_thoughts()
+
+        if len(previous_thoughts) == 0 and len(self.predecessors) > 0:
+            return
+
+        if len(previous_thoughts) == 0:
+            # no predecessors, use kwargs as base state
+            previous_thoughts = [Thought(state=kwargs)]
+
+        for thought in previous_thoughts:
+            base_state = thought.state
+            prompt = prompter.generate_prompt(self.num_branches_prompt, **base_state)
+            self.logger.debug("Prompt for LM: %s", prompt)
+            responses = lm.get_response_texts(
+                await lm.aquery(prompt, num_responses=self.num_branches_response)
+            )
+            self.logger.debug("Responses from LM: %s", responses)
+            for new_state in parser.parse_generate_answer(base_state, responses):
+                new_state = {**base_state, **new_state}
+                self.thoughts.append(Thought(new_state))
+                self.logger.debug(
+                    "New thought %d created with state %s",
+                    self.thoughts[-1].id,
+                    self.thoughts[-1].state,
+                )
+        if (
+            len(self.thoughts)
+            > self.num_branches_prompt
+            * self.num_branches_response
+            * len(previous_thoughts)
+            and self.num_branches_prompt > 0
+        ):
+            self.logger.warning(
+                "Generate operation %d created more thoughts than expected",
+                self.id,
+            )
+        self.logger.info(
+            "Generate operation %d created %d new thoughts", self.id, len(self.thoughts)
+        )
+
 
 class Improve(Operation):
     """
     Operation to improve thoughts.
     """
 
-    operation_type: OperationType = OperationType.improve
+    operation_type: OperationType = OperationType.IMPROVE
 
     def __init__(self) -> None:
         """
@@ -518,12 +734,38 @@ class Improve(Operation):
         """
         previous_thoughts: List[Thought] = self.get_previous_thoughts()
 
-        assert len(self.predecessors) > 0, "Needs at least one predecessor"
+        if len(self.predecessors) <= 0:
+            raise AssertionError("Needs at least one predecessor")
 
         for thought in previous_thoughts:
             improve_prompt = prompter.improve_prompt(**thought.state)
             self.logger.debug("Prompt for LM: %s", improve_prompt)
             responses = lm.get_response_texts(lm.query(improve_prompt, num_responses=1))
+            self.logger.debug("Responses from LM: %s", responses)
+            state_update = parser.parse_improve_answer(thought.state, responses)
+            self.thoughts.append(Thought({**thought.state, **state_update}))
+
+        self.logger.info(
+            "Improve operation %d improved %d thoughts", self.id, len(self.thoughts)
+        )
+
+    async def _execute_async(
+        self, lm: AbstractLanguageModel, prompter: Prompter, parser: Parser, **_kwargs
+    ) -> None:
+        """
+        Executes the Improve operation asynchronously.
+        """
+        previous_thoughts: List[Thought] = self.get_previous_thoughts()
+
+        if len(self.predecessors) <= 0:
+            raise AssertionError("Needs at least one predecessor")
+
+        for thought in previous_thoughts:
+            improve_prompt = prompter.improve_prompt(**thought.state)
+            self.logger.debug("Prompt for LM: %s", improve_prompt)
+            responses = lm.get_response_texts(
+                await lm.aquery(improve_prompt, num_responses=1)
+            )
             self.logger.debug("Responses from LM: %s", responses)
             state_update = parser.parse_improve_answer(thought.state, responses)
             self.thoughts.append(Thought({**thought.state, **state_update}))
@@ -538,22 +780,22 @@ class Aggregate(Operation):
     Operation to aggregate thoughts.
     """
 
-    operation_type: OperationType = OperationType.aggregate
+    operation_type: OperationType = OperationType.AGGREGATE
 
     def __init__(self, num_responses: int = 1) -> None:
         """
         Initializes a new Aggregate operation.
 
-        :param num_responses: Number of responses to use for aggregation. Defaults to 1.
+        :param num_responses: Number of responses to generate from the LM. Defaults to 1.
         :type num_responses: int
         """
         super().__init__()
-        self.thoughts: List[Thought] = []
         self.num_responses: int = num_responses
+        self.thoughts: List[Thought] = []
 
     def get_thoughts(self) -> List[Thought]:
         """
-        Returns the thoughts associated with the operation after aggregation.
+        Returns the aggregated thoughts.
 
         :return: List of aggregated thoughts.
         :rtype: List[Thought]
@@ -576,9 +818,10 @@ class Aggregate(Operation):
         :param kwargs: Additional parameters for execution.
         :raises AssertionError: If operation has no predecessors.
         """
-        assert (
-            len(self.predecessors) >= 1
-        ), "Aggregate operation must have at least one predecessor"
+        if len(self.predecessors) < 1:
+            raise AssertionError(
+                "Aggregate operation must have at least one predecessor"
+            )
 
         previous_thoughts: List[Thought] = self.get_previous_thoughts()
 
@@ -608,13 +851,52 @@ class Aggregate(Operation):
         for new_state in parsed:
             self.thoughts.append(Thought({**base_state, **new_state}))
 
+    async def _execute_async(
+        self, lm: AbstractLanguageModel, prompter: Prompter, parser: Parser, **_kwargs
+    ) -> None:
+        """
+        Executes the Aggregate operation asynchronously.
+        """
+        if len(self.predecessors) < 1:
+            raise AssertionError(
+                "Aggregate operation must have at least one predecessor"
+            )
+
+        previous_thoughts: List[Thought] = self.get_previous_thoughts()
+
+        if len(previous_thoughts) == 0:
+            return
+
+        # applied in order of score
+        base_state: Dict = {}
+        for thought in sorted(previous_thoughts, key=lambda thought: thought.score):
+            base_state = {**base_state, **thought.state}
+
+        previous_thought_states = [thought.state for thought in previous_thoughts]
+        prompt = prompter.aggregation_prompt(previous_thought_states)
+
+        self.logger.debug("Prompt for LM: %s", prompt)
+
+        responses = lm.get_response_texts(
+            await lm.aquery(prompt, num_responses=self.num_responses)
+        )
+
+        self.logger.debug("Responses from LM: %s", responses)
+
+        parsed = parser.parse_aggregation_answer(previous_thought_states, responses)
+
+        if isinstance(parsed, dict):
+            parsed = [parsed]
+        for new_state in parsed:
+            self.thoughts.append(Thought({**base_state, **new_state}))
+
 
 class KeepBestN(Operation):
     """
     Operation to keep the best N thoughts from predecessors based on their score.
     """
 
-    operation_type: OperationType = OperationType.keep_best_n
+    operation_type: OperationType = OperationType.KEEP_BEST_N
 
     def __init__(self, n: int, higher_is_better: bool = True) -> None:
         """
@@ -628,7 +910,8 @@ class KeepBestN(Operation):
         """
         super().__init__()
         self.n: int = n
-        assert self.n > 0, "KeepBestN operation must keep at least one thought"
+        if self.n <= 0:
+            raise AssertionError("KeepBestN operation must keep at least one thought")
         self.higher_is_better: bool = higher_is_better
         self.thoughts: List[Thought] = []
 
@@ -642,9 +925,8 @@ class KeepBestN(Operation):
         :raises AssertionError: If not all thoughts have been scored.
         """
         previous_thoughts: List[Thought] = self.get_previous_thoughts()
-        assert all(
-            previous_thought.scored for previous_thought in previous_thoughts
-        ), "Not all thoughts have been scored"
+        if not all(previous_thought.scored for previous_thought in previous_thoughts):
+            raise AssertionError("Not all thoughts have been scored")
 
         try:
             return sorted(
@@ -652,7 +934,7 @@ class KeepBestN(Operation):
                 key=lambda thought: thought.score,
                 reverse=self.higher_is_better,
             )[: self.n]
-        except:
+        except Exception:  # pylint: disable=broad-exception-caught
             self.logger.error("Error in KeepBestN operation")
             self.logger.error(
                 "Previous operation: %s", [op.id for op in self.predecessors]
@@ -680,7 +962,8 @@ class KeepBestN(Operation):
         self, lm: AbstractLanguageModel, prompter: Prompter, parser: Parser, **kwargs
     ) -> None:
         """
-        Executes the KeepBestN operation by keeping the best N thoughts from the predecessors according to their score.
+        Executes the KeepBestN operation by keeping the best N thoughts from the
+        predecessors according to their score.
 
         :param lm: The language model to be used.
         :type lm: AbstractLanguageModel
@@ -693,9 +976,10 @@ class KeepBestN(Operation):
         :raises AssertionError: If not all predecessors have been executed.
         :raises AssertionError: If not all thoughts have been scored.
         """
-        assert (
-            len(self.predecessors) >= 1
-        ), "KeepBestN operation must have at least one predecessor"
+        if len(self.predecessors) < 1:
+            raise AssertionError(
+                "KeepBestN operation must have at least one predecessor"
+            )
 
         self.thoughts = [Thought.from_thought(thought) for thought in self.get_best_n()]
 
@@ -714,7 +998,7 @@ class KeepValid(Operation):
     Operation to keep valid thoughts from predecessors.
     """
 
-    operation_type: OperationType = OperationType.keep_valid
+    operation_type: OperationType = OperationType.KEEP_VALID
 
     def __init__(self) -> None:
         """
@@ -748,9 +1032,10 @@ class KeepValid(Operation):
         :param kwargs: Additional parameters for execution.
         :raises AssertionError: If operation has no predecessors.
         """
-        assert (
-            len(self.predecessors) >= 1
-        ), "KeepValid operation must have at least one predecessor"
+        if len(self.predecessors) < 1:
+            raise AssertionError(
+                "KeepValid operation must have at least one predecessor"
+            )
 
         self.thoughts: List[Thought] = [
             Thought.from_thought(thought)
@@ -778,7 +1063,7 @@ class GroundTruth(Operation):
     Operation to evaluate if thoughts correctly solve the problem, using a ground truth evaluator
     """
 
-    operation_type: OperationType = OperationType.ground_truth_evaluator
+    operation_type: OperationType = OperationType.GROUND_TRUTH_EVALUATOR
 
     def __init__(self, ground_truth_evaluator: Callable[[Dict], bool]) -> None:
         """
@@ -804,7 +1089,8 @@ class GroundTruth(Operation):
         self, lm: AbstractLanguageModel, prompter: Prompter, parser: Parser, **kwargs
     ) -> None:
         """
-        Executes the GroundTruth operation by evaluating the predecessors' thoughts using the ground truth evaluator function.
+        Executes the GroundTruth operation by evaluating the predecessors' thoughts
+        using the ground truth evaluator function.
 
         :param lm: The language model to be used.
         :type lm: AbstractLanguageModel
@@ -815,9 +1101,10 @@ class GroundTruth(Operation):
         :param kwargs: Additional parameters for execution.
         :raises AssertionError: If operation has no predecessor.
         """
-        assert (
-            len(self.predecessors) >= 1
-        ), "GroundTruth operation must have at least one predecessor"
+        if len(self.predecessors) < 1:
+            raise AssertionError(
+                "GroundTruth operation must have at least one predecessor"
+            )
 
         previous_thoughts: List[Thought] = self.get_previous_thoughts()
 
@@ -825,7 +1112,7 @@ class GroundTruth(Operation):
             new_thought = Thought.from_thought(thought)
             try:
                 new_thought.solved = self.ground_truth_evaluator(new_thought.state)
-            except:
+            except Exception:  # pylint: disable=broad-exception-caught
                 new_thought.solved = False
             self.thoughts.append(new_thought)
 
@@ -840,10 +1127,9 @@ class GroundTruth(Operation):
 class Selector(Operation):
     """
     Operation to select thoughts from predecessors.
-    Useful for separating thoughts to perform different, subsequent operations on them.
     """
 
-    operation_type: OperationType = OperationType.selector
+    operation_type: OperationType = OperationType.SELECTOR
 
     def __init__(self, selector: Callable[[List[Thought]], List[Thought]]) -> None:
         """
@@ -869,8 +1155,10 @@ class Selector(Operation):
         self, lm: AbstractLanguageModel, prompter: Prompter, parser: Parser, **kwargs
     ) -> None:
         """
-        Executes the Selector operation by selecting thoughts from the predecessors using the selector function.
-        If the Selector has no predecessors, the selector function is called with a thought containing the kwargs as state.
+        Executes the Selector operation by selecting thoughts from the predecessors
+        using the selector function.
+        If the Selector has no predecessors, the selector function is called with a
+        thought containing the kwargs as state.
 
         :param lm: The language model to be used.
         :type lm: AbstractLanguageModel

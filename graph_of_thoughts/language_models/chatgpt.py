@@ -6,12 +6,14 @@
 #
 # main author: Nils Blach
 
-import backoff
+import asyncio
 import os
 import random
 import time
-from typing import List, Dict, Union
-from openai import OpenAI, OpenAIError
+from typing import Dict, List, Union
+
+import backoff
+from openai import AsyncOpenAI, OpenAI, OpenAIError
 from openai.types.chat.chat_completion import ChatCompletion
 
 from .abstract_language_model import AbstractLanguageModel
@@ -59,6 +61,7 @@ class ChatGPT(AbstractLanguageModel):
             raise ValueError("OPENAI_API_KEY is not set")
         # Initialize the OpenAI Client
         self.client = OpenAI(api_key=self.api_key, organization=self.organization)
+        self.aclient = AsyncOpenAI(api_key=self.api_key, organization=self.organization)
 
     def query(
         self, query: str, num_responses: int = 1
@@ -101,6 +104,51 @@ class ChatGPT(AbstractLanguageModel):
             self.response_cache[query] = response
         return response
 
+    async def aquery(
+        self, query: str, num_responses: int = 1
+    ) -> Union[List[ChatCompletion], ChatCompletion]:
+        """
+        Asynchronously query the OpenAI model for responses.
+
+        :param query: The query to be posed to the language model.
+        :type query: str
+        :param num_responses: Number of desired responses, default is 1.
+        :type num_responses: int
+        :return: Response(s) from the OpenAI model.
+        :rtype: Dict
+        """
+        if self.cache and query in self.response_cache:
+            return self.response_cache[query]
+
+        if num_responses == 1:
+            response = await self.achat(
+                [{"role": "user", "content": query}], num_responses
+            )
+        else:
+            response = []
+            next_try = num_responses
+            total_num_attempts = num_responses
+            while num_responses > 0 and total_num_attempts > 0:
+                try:
+                    assert next_try > 0
+                    res = await self.achat(
+                        [{"role": "user", "content": query}], next_try
+                    )
+                    response.append(res)
+                    num_responses -= next_try
+                    next_try = min(num_responses, next_try)
+                except Exception as e:
+                    next_try = (next_try + 1) // 2
+                    self.logger.warning(
+                        f"Error in chatgpt async: {e}, trying again with {next_try} samples"
+                    )
+                    await asyncio.sleep(random.randint(1, 3))
+                    total_num_attempts -= 1
+
+        if self.cache:
+            self.response_cache[query] = response
+        return response
+
     @backoff.on_exception(backoff.expo, OpenAIError, max_time=10, max_tries=6)
     def chat(self, messages: List[Dict], num_responses: int = 1) -> ChatCompletion:
         """
@@ -133,6 +181,44 @@ class ChatGPT(AbstractLanguageModel):
         )
         self.logger.info(
             f"This is the response from chatgpt: {response}"
+            f"\nThis is the cost of the response: {self.cost}"
+        )
+        return response
+
+    @backoff.on_exception(backoff.expo, OpenAIError, max_time=10, max_tries=6)
+    async def achat(
+        self, messages: List[Dict], num_responses: int = 1
+    ) -> ChatCompletion:
+        """
+        Send chat messages to the OpenAI model asynchronously and retrieves the model's response.
+        Implements backoff on OpenAI error.
+
+        :param messages: A list of message dictionaries for the chat.
+        :type messages: List[Dict]
+        :param num_responses: Number of desired responses, default is 1.
+        :type num_responses: int
+        :return: The OpenAI model's response.
+        :rtype: ChatCompletion
+        """
+        response = await self.aclient.chat.completions.create(
+            model=self.model_id,
+            messages=messages,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+            n=num_responses,
+            stop=self.stop,
+        )
+
+        self.prompt_tokens += response.usage.prompt_tokens
+        self.completion_tokens += response.usage.completion_tokens
+        prompt_tokens_k = float(self.prompt_tokens) / 1000.0
+        completion_tokens_k = float(self.completion_tokens) / 1000.0
+        self.cost = (
+            self.prompt_token_cost * prompt_tokens_k
+            + self.response_token_cost * completion_tokens_k
+        )
+        self.logger.info(
+            f"This is the response from chatgpt async: {response}"
             f"\nThis is the cost of the response: {self.cost}"
         )
         return response

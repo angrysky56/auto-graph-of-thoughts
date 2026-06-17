@@ -7,8 +7,13 @@
 # main author: Ales Kubicek
 
 import os
-import torch
-from typing import List, Dict, Union
+from typing import Dict, List, Union
+
+try:
+    import torch
+except ImportError:
+    torch = None
+
 from .abstract_language_model import AbstractLanguageModel
 
 
@@ -20,6 +25,11 @@ class Llama2HF(AbstractLanguageModel):
     def __init__(
         self, config_path: str = "", model_name: str = "llama7b-hf", cache: bool = False
     ) -> None:
+        if torch is None:
+            raise ImportError(
+                "Llama2HF requires torch and transformers. "
+                "Please install the optional dependencies with: pip install -e .[hf]"
+            )
         """
         Initialize an instance of the Llama2HF class with configuration, model details, and caching options.
 
@@ -106,6 +116,14 @@ class Llama2HF(AbstractLanguageModel):
         if self.cache:
             self.response_cache[query] = response
         return response
+
+    async def aquery(self, query: str, num_responses: int = 1) -> List[Dict]:
+        """
+        Asynchronously query the LLaMA 2 model using asyncio.to_thread.
+        """
+        import asyncio
+
+        return await asyncio.to_thread(self.query, query, num_responses)
 
     def get_response_texts(self, query_responses: List[Dict]) -> List[str]:
         """

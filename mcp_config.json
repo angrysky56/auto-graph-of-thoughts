@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "graph-of-thought": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/home/ty/Repositories/ai_workspace/auto-graph-of-thoughts",
+        "run",
+        "python",
+        "-m",
+        "graph_of_thoughts.mcp_server"
+      ],
+      "env": {
+        "OPENROUTER_API_KEY": "your_openrouter_api_key_here",
+        "OPENAI_API_KEY": "your_openai_api_key_here"
+      }
+    }
+  }
+}
