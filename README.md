@@ -161,6 +161,65 @@ python -m examples.keyword_counting.keyword_counting
 
 ---
 
+## Use Cases (for AI agents via MCP)
+
+Once the MCP server is connected, an agent (Claude, Gemini, etc.) can treat GoT
+as a **reasoning subroutine**: instead of answering a hard problem in one shot,
+it builds a graph that generates many candidates, scores them, prunes to the
+best, and merges the survivors. The two modes make this useful in different
+situations:
+
+- **Client-side (no API key, no cost)** — the agent is the LLM. It calls
+  `got_get_prompt` to get a formatted step, produces the thought with its own
+  model, then `got_parse_response` to structure the result. Use this to impose a
+  disciplined branch/score/prune loop on the agent's _own_ reasoning.
+- **Server-side (uses your `.env` key)** — the engine runs the whole DAG
+  concurrently against any OpenRouter/OpenAI model via `execute_got_graph` or a
+  stateful session. Use this to offload many branches to a cheaper/faster model
+  and get back a single scored, merged answer.
+
+### What it's good for
+
+- **Strategy / option generation with scoring.** Generate N distinct approaches
+  to a problem, have the model score each on your own rubric (e.g.
+  _impact × feasibility_), keep the top few, then aggregate them into one plan.
+  A complete, runnable example ships at
+  [`examples/custom_tasks/rag_antihallucination.json`](examples/custom_tasks/rag_antihallucination.json)
+  (`generate×4 → score → keep_best_n(2) → aggregate → improve`).
+- **Decompose → solve → recombine over large inputs.** Split a long document or
+  list into chunks, solve each branch independently and in parallel, then
+  merge — the original paper's wins on sorting, keyword counting, and set
+  intersection are this pattern.
+- **Answer / document synthesis.** Produce several drafts, score for accuracy or
+  coverage, and `aggregate` the best into a single consolidated output
+  (see the `doc_merge` task).
+- **Self-critique and refinement loops.** Chain `validate_and_improve` or
+  `improve` nodes so a draft is checked and rewritten until it passes, instead
+  of trusting a single pass.
+- **Verifiable tasks with ground truth.** Attach a `ground_truth` evaluator so
+  the graph reports whether each surviving thought is actually correct — useful
+  for benchmarking a model or gating an automated pipeline.
+
+### Minimal agent recipe
+
+Write a `generate` template that asks for **one** candidate, a `score` template
+that demands a **bare integer**, then wire:
+
+```
+generate (×N)  →  score  →  keep_best_n  →  aggregate  →  improve
+```
+
+Pass it to `execute_got_graph` with `task_name: "custom"`. For deeper guidance
+on authoring templates and parser specs, see the bundled agent skill at
+[`.claude/skills/graph-of-thoughts/SKILL.md`](.claude/skills/graph-of-thoughts/SKILL.md).
+
+> Note on scoring: the built-in `sorting`, `keyword_counting`, and
+> `set_intersection` tasks score with deterministic functions, so their text
+> `score` prompts are intentionally absent. For LLM-judged scoring, use
+> `doc_merge` or a `custom` task (as in the example above).
+
+---
+
 ## Citations
 
 If you find this repository valuable, please cite the AAAI paper:
