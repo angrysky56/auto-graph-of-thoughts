@@ -56,6 +56,32 @@ exposed with the `mcp__graph-of-thought__*` tools.
 **Canonical GoT shape:** `generate → score → keep_best_n → (aggregate | improve)
 → score → keep_best_n → ground_truth`.
 
+### Principled selection ops (native, self-contained)
+
+These upgrade GoT's weak default scoring. They need no extra models — they reuse
+the graph's own LLM — and they judge at low temperature automatically.
+
+- `rubric_score` — LLM rubric judge. Params: `criteria` (list of strings),
+  `axis` (default `_quality`), `num_samples`. Asks for a per-criterion
+  `[[YES]]/[[NO]]` verdict and parses it deterministically; writes the fraction
+  met to `state[axis]`. A reliable **quality / convergent** axis (replaces the
+  fragile "grab any number" parser).
+- `novelty_score` — reference-free **novelty / divergent** axis. Clusters a
+  node's sibling thoughts by bidirectional entailment and scores each by the
+  normalised surprisal of its semantic class; writes to `state[axis]` (default
+  `_novelty`). Run it directly on a `generate` node's branches.
+- `keep_pareto` — multi-axis Pareto selection with a **convergent floor**
+  (anti-Goodhart guard). Params: `axes` (default `["_novelty","_quality"]`),
+  `floor_axis` (default `_quality`), `floor` (default `0.5`), `n` (optional cap).
+  Drops anything below the floor, keeps the non-dominated frontier, never
+  returns empty.
+
+**Creative selection shape:** `generate(wide) → novelty_score → rubric_score →
+keep_pareto → improve`. The floor stops novelty from being maximised into
+incoherence; the Pareto frontier keeps genuinely different good answers rather
+than collapsing to one. (Novelty method credited in-code to the ACL 2026
+creativity-evaluation paper; implementation is original and API-only.)
+
 ## Server-side: stateless one-shot (`execute_got_graph`)
 
 ```jsonc

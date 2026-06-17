@@ -12,3 +12,9 @@ from .operations import (
     GroundTruth,
     Improve,
 )
+from .creativity import (
+    CreativeOpType,
+    KeepPareto,
+    NoveltyScore,
+    RubricScore,
+)

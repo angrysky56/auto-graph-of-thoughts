@@ -349,6 +349,30 @@ async def add_got_operation(
         )
     elif op_type == "keep_valid":
         op = operations.KeepValid()
+    elif op_type == "rubric_score":
+        # LLM rubric judge -> writes a 'quality'/convergent axis.
+        op = operations.RubricScore(
+            criteria=params.get(
+                "criteria", ["feasibility", "effectiveness", "safety"]
+            ),
+            axis=params.get("axis", "_quality"),
+            problem_key=params.get("problem_key", "original"),
+            answer_key=params.get("answer_key", "current"),
+            num_samples=params.get("num_samples", 1),
+        )
+    elif op_type == "novelty_score":
+        # reference-free semantic-class novelty -> writes a 'novelty'/divergent axis.
+        op = operations.NoveltyScore(
+            axis=params.get("axis", "_novelty"),
+        )
+    elif op_type == "keep_pareto":
+        # multi-axis Pareto selection with a convergent floor (anti-Goodhart).
+        op = operations.KeepPareto(
+            axes=params.get("axes"),
+            floor_axis=params.get("floor_axis", "_quality"),
+            floor=params.get("floor", 0.5),
+            n=params.get("n"),
+        )
     elif op_type == "aggregate":
         op = operations.Aggregate(
             num_responses=params.get("num_responses", 1),

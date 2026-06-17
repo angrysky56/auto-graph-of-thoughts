@@ -71,16 +71,22 @@ class OpenRouter(AbstractLanguageModel):
         )
 
     def query(
-        self, query: str, num_responses: int = 1
+        self, query: str, num_responses: int = 1, temperature: float | None = None
     ) -> Union[List[ChatCompletion], ChatCompletion]:
         """
         Query the OpenRouter model for responses.
+
+        :param temperature: Optional per-call temperature override. When None the
+                            model's configured temperature is used; pass a low
+                            value (e.g. 0.0) for deterministic judging/scoring.
         """
         if self.cache and query in self.response_cache:
             return self.response_cache[query]
 
         if num_responses == 1:
-            response = self.chat([{"role": "user", "content": query}], num_responses)
+            response = self.chat(
+                [{"role": "user", "content": query}], num_responses, temperature
+            )
         else:
             response = []
             next_try = num_responses
@@ -89,7 +95,9 @@ class OpenRouter(AbstractLanguageModel):
                 try:
                     if next_try <= 0:
                         raise ValueError("next_try must be positive")
-                    res = self.chat([{"role": "user", "content": query}], next_try)
+                    res = self.chat(
+                        [{"role": "user", "content": query}], next_try, temperature
+                    )
                     response.append(res)
                     num_responses -= next_try
                     next_try = min(num_responses, next_try)
@@ -149,15 +157,23 @@ class OpenRouter(AbstractLanguageModel):
         return response
 
     @backoff.on_exception(backoff.expo, OpenAIError, max_time=10, max_tries=6)
-    def chat(self, messages: List[Dict], num_responses: int = 1) -> ChatCompletion:
+    def chat(
+        self,
+        messages: List[Dict],
+        num_responses: int = 1,
+        temperature: float | None = None,
+    ) -> ChatCompletion:
         """
         Send chat messages to OpenRouter and retrieve the model's response.
         Implements backoff on OpenAI error.
+
+        :param temperature: Optional per-call temperature override; falls back to
+                            the model's configured temperature when None.
         """
         response = self.client.chat.completions.create(
             model=self.model_id,
             messages=messages,
-            temperature=self.temperature,
+            temperature=self.temperature if temperature is None else temperature,
             max_tokens=self.max_tokens,
             n=num_responses,
             stop=self.stop,

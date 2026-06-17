@@ -64,7 +64,7 @@ class ChatGPT(AbstractLanguageModel):
         self.aclient = AsyncOpenAI(api_key=self.api_key, organization=self.organization)
 
     def query(
-        self, query: str, num_responses: int = 1
+        self, query: str, num_responses: int = 1, temperature: float | None = None
     ) -> Union[List[ChatCompletion], ChatCompletion]:
         """
         Query the OpenAI model for responses.
@@ -73,6 +73,10 @@ class ChatGPT(AbstractLanguageModel):
         :type query: str
         :param num_responses: Number of desired responses, default is 1.
         :type num_responses: int
+        :param temperature: Optional per-call temperature override. When None the
+                            model's configured temperature is used; pass a low
+                            value (e.g. 0.0) for deterministic judging/scoring.
+        :type temperature: float | None
         :return: Response(s) from the OpenAI model.
         :rtype: Dict
         """
@@ -80,7 +84,9 @@ class ChatGPT(AbstractLanguageModel):
             return self.response_cache[query]
 
         if num_responses == 1:
-            response = self.chat([{"role": "user", "content": query}], num_responses)
+            response = self.chat(
+                [{"role": "user", "content": query}], num_responses, temperature
+            )
         else:
             response = []
             next_try = num_responses
@@ -88,7 +94,9 @@ class ChatGPT(AbstractLanguageModel):
             while num_responses > 0 and total_num_attempts > 0:
                 try:
                     assert next_try > 0
-                    res = self.chat([{"role": "user", "content": query}], next_try)
+                    res = self.chat(
+                        [{"role": "user", "content": query}], next_try, temperature
+                    )
                     response.append(res)
                     num_responses -= next_try
                     next_try = min(num_responses, next_try)
@@ -150,7 +158,12 @@ class ChatGPT(AbstractLanguageModel):
         return response
 
     @backoff.on_exception(backoff.expo, OpenAIError, max_time=10, max_tries=6)
-    def chat(self, messages: List[Dict], num_responses: int = 1) -> ChatCompletion:
+    def chat(
+        self,
+        messages: List[Dict],
+        num_responses: int = 1,
+        temperature: float | None = None,
+    ) -> ChatCompletion:
         """
         Send chat messages to the OpenAI model and retrieves the model's response.
         Implements backoff on OpenAI error.
@@ -159,13 +172,16 @@ class ChatGPT(AbstractLanguageModel):
         :type messages: List[Dict]
         :param num_responses: Number of desired responses, default is 1.
         :type num_responses: int
+        :param temperature: Optional per-call temperature override; falls back to
+                            the model's configured temperature when None.
+        :type temperature: float | None
         :return: The OpenAI model's response.
         :rtype: ChatCompletion
         """
         response = self.client.chat.completions.create(
             model=self.model_id,
             messages=messages,
-            temperature=self.temperature,
+            temperature=self.temperature if temperature is None else temperature,
             max_tokens=self.max_tokens,
             n=num_responses,
             stop=self.stop,
