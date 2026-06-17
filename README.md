@@ -46,24 +46,31 @@ uv pip install -e .[hf]
 
 ### Configuring the LLM
 
-1. **OpenRouter**: Set the environment variable `OPENROUTER_API_KEY`:
+We use `python-dotenv` to manage configurations. You can configure your environment in two ways:
+
+1. **OS Environment Variables**: Simply export them in your shell (e.g. `~/.bashrc`):
+
    ```bash
    export OPENROUTER_API_KEY="your-api-key"
-   ```
-2. **OpenAI**: Set the environment variable `OPENAI_API_KEY`:
-   ```bash
-   export OPENAI_API_KEY="your-api-key"
+   export GOT_LANGUAGE_MODEL="openrouter"
    ```
 
-You can configure model specifics (e.g. model ID, costs, temperature) in `config.json` (see `graph_of_thoughts/language_models/config_template.json` for structure).
+2. **.env File**: Create a `.env` file in the project root:
+   ```env
+   OPENROUTER_API_KEY=your-api-key
+   OPENROUTER_MODEL_ID=meta-llama/llama-3-70b-instruct
+   GOT_LANGUAGE_MODEL=openrouter
+   ```
+
+You can configure more complex model specifics (e.g. costs, parameters) in `config.json` (see `graph_of_thoughts/language_models/config_template.json` for structure), but for standard usage, the `.env` approach is recommended.
 
 ---
 
 ## Model Context Protocol (MCP) Server
 
-Graph of Thoughts can run as an MCP server, exposing tools to your AI assistant. An example setup file is provided in [mcp_config.json](file:///home/ty/Repositories/ai_workspace/auto-graph-of-thoughts/mcp_config.json).
+Graph of Thoughts can run as an MCP server, exposing tools to your AI assistant. An example setup file is provided in [mcp_config.json](mcp_config.json).
 
-### Running the Server
+### Running the Server (Non-MCP Config Usage)
 
 Start the server using `uv`:
 
@@ -73,19 +80,21 @@ uv run python -m graph_of_thoughts.mcp_server
 
 ### Server Execution Modes
 
-The MCP server supports two execution modes:
+The MCP server supports two different ways to handle the actual "thinking" (the LLM calls).
 
-#### 1. Server-Side Execution (Requires API keys on the server)
+#### 1. The MCP Server Calls the LLM (Requires API Keys)
 
-- **Stateless Tool (`execute_got_graph`)**: Send a complete JSON DAG definition and input variables, and receive the final solved state.
-- **Stateful Tools (`create_got_session`, `add_got_operation`, `run_got_session`)**: Dynamically build graphs node-by-node (useful for agents constructing custom structures programmatically) and execute them.
+In this mode, the GoT framework handles everything. It builds the graph and makes the network requests to OpenRouter/OpenAI using the API keys you provided in your `.env`.
 
-#### 2. Client-Side Execution (No API keys or internet connection required by the server)
+- **Stateless Tool (`execute_got_graph`)**: Send a complete JSON DAG definition to the server. The server runs the entire graph, queries the LLM, and returns the final result.
+- **Stateful Tools (`create_got_session`, `add_got_operation`, `run_got_session`)**: Build graphs node-by-node programmatically, then tell the server to run them using its own LLM connection.
 
-If the client agent (like Claude) wants to query the LLM itself (e.g., using its own API provider):
+#### 2. The AI Assistant Acts as the LLM (No API Keys Required on Server)
 
-- **Prompt Helper (`got_get_prompt`)**: Get the formatted prompt (e.g., Generate, Score, Aggregate) for a specific step.
-- **Parse Helper (`got_parse_response`)**: Pass the raw LLM output text back to the server to extract structured thought updates or validation scores.
+If you (or your AI assistant) don't want the server to make its own API calls, the AI assistant can act as the LLM itself! The server will just provide the formatting and parsing logic.
+
+- **Prompt Helper (`got_get_prompt`)**: The AI assistant asks the server "What prompt should I use to generate the next thought?" The server returns the formatted text.
+- **Parse Helper (`got_parse_response`)**: After the AI assistant generates the thoughts using its own internal model, it passes the raw text back to the server. The server parses the text and extracts the structured scores/updates.
 
 ---
 

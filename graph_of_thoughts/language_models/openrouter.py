@@ -30,10 +30,12 @@ class OpenRouter(AbstractLanguageModel):
         Initialize the OpenRouter instance with configuration, model details, and caching options.
         """
         super().__init__(config_path, model_name, cache)
-        self.config: Dict = self.config[model_name]
+        self.config: Dict = self.config.get(model_name, {})
         # The model_id is the id of the model that is used for openrouter,
         # e.g. meta-llama/llama-3-70b-instruct, etc.
-        self.model_id: str = self.config["model_id"]
+        self.model_id: str = os.getenv(
+            "OPENROUTER_MODEL_ID", self.config.get("model_id", "openrouter/auto")
+        )
         # Cost tracking parameters
         self.prompt_token_cost: float = self.config.get("prompt_token_cost", 0.0)
         self.response_token_cost: float = self.config.get("response_token_cost", 0.0)

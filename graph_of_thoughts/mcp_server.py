@@ -10,11 +10,15 @@ import re
 import uuid
 from typing import Any, Dict, List, Optional, Union
 
+from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
 from graph_of_thoughts import controller, language_models, operations
 from graph_of_thoughts.parser import Parser
 from graph_of_thoughts.prompter import Prompter
+
+# Load environment variables from .env if present
+load_dotenv()
 
 # Set up logging
 logger = logging.getLogger("mcp_server_got")
@@ -231,7 +235,7 @@ async def create_got_session(
     initial_parameters: dict,
     task_name: str = "custom",
     config_path: str = "",
-    model_name: str = "chatgpt",
+    model_name: str = "",
     templates: Optional[dict] = None,
     parser_spec: Optional[dict] = None,
 ) -> str:
@@ -247,6 +251,10 @@ async def create_got_session(
     :return: A session_id string.
     """
     session_id = str(uuid.uuid4())
+
+    import os
+    if not model_name:
+        model_name = os.getenv("GOT_LANGUAGE_MODEL", "chatgpt")
 
     # Instantiate Language Model
     if "openrouter" in model_name.lower():
@@ -459,7 +467,7 @@ async def execute_got_graph(
     graph_def: dict,
     task_name: str = "custom",
     config_path: str = "",
-    model_name: str = "chatgpt",
+    model_name: str = "",
     templates: Optional[dict] = None,
     parser_spec: Optional[dict] = None,
 ) -> dict:
@@ -482,6 +490,10 @@ async def execute_got_graph(
     :return: A dictionary of results and stats.
     """
     # Create temporary session
+    import os
+    if not model_name:
+        model_name = os.getenv("GOT_LANGUAGE_MODEL", "chatgpt")
+
     session_id = await create_got_session(
         initial_parameters=initial_parameters,
         task_name=task_name,
