@@ -233,7 +233,7 @@ List 2: {input2}
         :return: The improve prompt.
         :rtype: str
         """
-        pass
+        raise NotImplementedError
 
     def validation_prompt(self, **kwargs) -> str:
         """
@@ -243,7 +243,7 @@ List 2: {input2}
         :return: The validation prompt.
         :rtype: str
         """
-        pass
+        raise NotImplementedError
 
     def score_prompt(self, state_dicts: List[Dict], **kwargs) -> str:
         """
@@ -256,7 +256,7 @@ List 2: {input2}
         :return: The score prompt.
         :rtype: str
         """
-        pass
+        raise NotImplementedError
 
 
 class SetIntersectionParser(parser.Parser):

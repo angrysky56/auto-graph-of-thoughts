@@ -1,14 +1,15 @@
-# Copyright (c) 2026 ETH Zurich / Modernized.
-#                    All rights reserved.
-#
-# Use of this source code is governed by a BSD-style license that can be
-# found in the LICENSE file.
+"""
+MCP Server implementation for Graph of Thoughts.
+"""
 
+import ast
 import json
 import logging
+import os
 import re
 import uuid
-from typing import Any, Dict, List, Optional, Union
+from functools import partial
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
@@ -57,7 +58,8 @@ class DynamicPrompter(Prompter):
     def score_prompt(self, state_dicts: List[Dict], **kwargs) -> str:
         template = self.templates.get(
             "score",
-            "Evaluate and score the following thoughts or states. Return a numerical score for each (higher is better).\n"
+            "Evaluate and score the following thoughts or states. "
+            "Return a numerical score for each (higher is better).\n"
             "Thoughts: {state_dicts}",
         )
         return template.format(state_dicts=state_dicts, **kwargs)
@@ -65,14 +67,15 @@ class DynamicPrompter(Prompter):
     def aggregation_prompt(self, state_dicts: List[Dict], **kwargs) -> str:
         template = self.templates.get(
             "aggregation",
-            "Combine or aggregate the following thoughts/states into a single consolidated thought or solution:\n"
+            "Combine or aggregate the following thoughts/states "
+            "into a single consolidated thought or solution:\n"
             "Thoughts: {state_dicts}",
         )
         return template.format(state_dicts=state_dicts, **kwargs)
 
     def improve_prompt(self, **kwargs) -> str:
         template = self.templates.get(
-            "improve", "Improve the following thought/state:\n" "State: {current}"
+            "improve", "Improve the following thought/state:\nState: {current}"
         )
         return template.format(**kwargs)
 
@@ -100,7 +103,7 @@ class DynamicParser(Parser):
             if match:
                 return json.loads(match.group(1))
             return json.loads(text)
-        except Exception:
+        except (json.JSONDecodeError, TypeError):
             return None
 
     def _extract_list(self, text: str) -> List[Any]:
@@ -109,10 +112,8 @@ class DynamicParser(Parser):
             match = re.search(r"(\[.*\])", text)
             if match:
                 # safe evaluation of list literal
-                import ast
-
                 return ast.literal_eval(match.group(1))
-        except Exception:
+        except (ValueError, SyntaxError, TypeError):
             pass
         # Fallback to splitting lines/commas
         cleaned = text.replace("[", "").replace("]", "").strip()
@@ -194,7 +195,9 @@ class DynamicParser(Parser):
         return False
 
 
-def get_task_prompter_parser(task_name: str, spec: dict = None, templates: dict = None):
+def get_task_prompter_parser(
+    task_name: str, spec: dict = None, templates: dict = None
+) -> Tuple[Prompter, Parser]:
     """
     Helper to get the corresponding Prompter and Parser based on task name.
     """
@@ -242,8 +245,10 @@ async def create_got_session(
     """
     Create a stateful Graph of Thoughts session.
 
-    :param initial_parameters: The dictionary containing the initial variables (e.g., {"original": "[2, 1, 3]", "current": ""}).
-    :param task_name: Built-in task name ("sorting", "keyword_counting", "set_intersection", "doc_merge") or "custom".
+    :param initial_parameters: The dictionary containing the initial variables
+                               (e.g., {"original": "[2, 1, 3]", "current": ""}).
+    :param task_name: Built-in task name ("sorting", "keyword_counting",
+                      "set_intersection", "doc_merge") or "custom".
     :param config_path: Path to config.json. Defaults to empty (uses default config.json).
     :param model_name: Name of model in config.json. Defaults to "chatgpt".
     :param templates: Optional dict containing custom prompt templates (for custom task).
@@ -251,8 +256,6 @@ async def create_got_session(
     :return: A session_id string.
     """
     session_id = str(uuid.uuid4())
-
-    import os
 
     if not model_name:
         model_name = os.getenv("GOT_LANGUAGE_MODEL", "chatgpt")
@@ -295,7 +298,9 @@ async def add_got_operation(
     Add a node (operation) to a stateful Graph of Thoughts session.
 
     :param session_id: The ID of the session.
-    :param op_type: Type of operation ("generate", "score", "keep_best_n", "keep_valid", "aggregate", "improve", "validate_and_improve", "ground_truth").
+    :param op_type: Type of operation ("generate", "score", "keep_best_n",
+                    "keep_valid", "aggregate", "improve", "validate_and_improve",
+                    "ground_truth").
     :param client_op_id: A unique ID for this operation node within the client's scope.
     :param predecessor_ids: Optional list of client_op_ids that this operation depends on.
     :param params: Dict of configuration parameters for the operation.
@@ -327,8 +332,6 @@ async def add_got_operation(
             scoring_fn = num_errors
         elif fn_name == "keyword_counting_errors":
             # keyword counting errors needs parameters, can use wrapper
-            from functools import partial
-
             from examples.keyword_counting.keyword_counting import num_errors
 
             # Default to some lists
@@ -373,7 +376,7 @@ async def add_got_operation(
         # fallback dummy function
         if eval_fn is None:
 
-            def default_eval_fn(x):
+            def default_eval_fn(_x):
                 return True
 
             eval_fn = default_eval_fn
@@ -479,8 +482,10 @@ async def execute_got_graph(
     :param graph_def: Definition of the graph in a format like:
                       {
                           "nodes": [
-                              {"id": "gen1", "type": "generate", "params": {"num_branches_prompt": 1, "num_branches_response": 1}},
-                              {"id": "score1", "type": "score", "predecessors": ["gen1"], "params": {"scoring_function": "sorting_errors"}}
+                              {"id": "gen1", "type": "generate",
+                               "params": {"num_branches_prompt": 1, "num_branches_response": 1}},
+                              {"id": "score1", "type": "score", "predecessors": ["gen1"],
+                               "params": {"scoring_function": "sorting_errors"}}
                           ]
                       }
     :param task_name: Built-in task name or "custom".
@@ -491,7 +496,6 @@ async def execute_got_graph(
     :return: A dictionary of results and stats.
     """
     # Create temporary session
-    import os
 
     if not model_name:
         model_name = os.getenv("GOT_LANGUAGE_MODEL", "chatgpt")
@@ -535,33 +539,53 @@ async def got_get_prompt(
     """
     Get a formatted prompt for client-side LLM execution.
 
-    :param prompt_type: Type of prompt ("generate", "score", "aggregation", "improve", "validation").
-    :param task_name: Task name ("sorting", "keyword_counting", "set_intersection", "doc_merge") or "custom".
-    :param variables: Dict containing variables for the prompt (e.g. {"original": "[2, 1]", "current": "", "method": "got"}).
+    :param prompt_type: Type of prompt ("generate", "score", "aggregation",
+                        "improve", "validation").
+    :param task_name: Task name ("sorting", "keyword_counting",
+                      "set_intersection", "doc_merge") or "custom".
+    :param variables: Dict containing variables for the prompt
+                      (e.g. {"original": "[2, 1]", "current": "", "method": "got"}).
     :param templates: Optional dict containing custom templates if task_name is "custom".
     """
     variables = variables or {}
+    prompter: Prompter
     prompter, _ = get_task_prompter_parser(task_name, templates=templates)
 
     p_type = prompt_type.lower()
-    if p_type == "generate":
-        num_branches = variables.pop("num_branches", 1)
-        # some prompters expect original, current, method
-        return prompter.generate_prompt(num_branches, **variables)
-    elif p_type == "score":
-        # pop so state_dicts is not also splatted via **variables (would
-        # raise "got multiple values for argument 'state_dicts'").
-        state_dicts = variables.pop("state_dicts", [])
-        return prompter.score_prompt(state_dicts, **variables)
-    elif p_type == "aggregation":
-        state_dicts = variables.pop("state_dicts", [])
-        return prompter.aggregation_prompt(state_dicts, **variables)
-    elif p_type == "improve":
-        return prompter.improve_prompt(**variables)
-    elif p_type == "validation":
-        return prompter.validation_prompt(**variables)
-    else:
-        raise ValueError(f"Unknown prompt type: {prompt_type}")
+    prompt = None
+    try:
+        if p_type == "generate":
+            num_branches = variables.pop("num_branches", 1)
+            # some prompters expect original, current, method
+            prompt = prompter.generate_prompt(num_branches, **variables)
+        elif p_type == "score":
+            # pop so state_dicts is not also splatted via **variables (would
+            # raise "got multiple values for argument 'state_dicts'").
+            state_dicts = variables.pop("state_dicts", [])
+            prompt = prompter.score_prompt(state_dicts, **variables)
+        elif p_type == "aggregation":
+            state_dicts = variables.pop("state_dicts", [])
+            prompt = prompter.aggregation_prompt(state_dicts, **variables)
+        elif p_type == "improve":
+            prompt = prompter.improve_prompt(**variables)
+        elif p_type == "validation":
+            prompt = prompter.validation_prompt(**variables)
+        else:
+            raise ValueError(f"Unknown prompt type: {prompt_type}")
+    except NotImplementedError:
+        prompt = None
+
+    # Several built-in prompters (sorting, keyword_counting, set_intersection)
+    # intentionally leave score_prompt unimplemented (those tasks score with
+    # deterministic functions, not by prompting), so it returns None. Surface a
+    # clear, actionable error instead of an opaque return-type validation error.
+    if prompt is None:
+        raise ValueError(
+            f"Task '{task_name}' does not provide a '{p_type}' prompt "
+            f"(its prompter returns None). For text-based {p_type}, use the "
+            f"'doc_merge' task or a 'custom' task with your own templates."
+        )
+    return prompt
 
 
 @mcp.tool()
@@ -575,13 +599,18 @@ async def got_parse_response(
     """
     Parse LLM response texts for client-side LLM execution.
 
-    :param parse_type: Type of parsing ("generate", "score", "aggregation", "improve", "validation").
+    :param parse_type: Type of parsing ("generate", "score", "aggregation",
+                       "improve", "validation").
     :param responses: List of raw string responses from the LLM.
-    :param task_name: Task name ("sorting", "keyword_counting", "set_intersection", "doc_merge") or "custom".
-    :param variables: Dict containing variables / input states used to generate the prompt (e.g. {"state": {...}} or {"states": [...]}).
-    :param parser_spec: Optional dict containing custom parsing specification if task_name is "custom".
+    :param task_name: Task name ("sorting", "keyword_counting",
+                      "set_intersection", "doc_merge") or "custom".
+    :param variables: Dict containing variables / input states used to generate the
+                      prompt (e.g. {"state": {...}} or {"states": [...]}).
+    :param parser_spec: Optional dict containing custom parsing specification
+                        if task_name is "custom".
     """
     variables = variables or {}
+    parser: Parser
     _, parser = get_task_prompter_parser(task_name, spec=parser_spec)
 
     # NOTE: several built-in parsers (sorting, keyword_counting,

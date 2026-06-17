@@ -837,7 +837,7 @@ Output:
         :return: The validation prompt.
         :rtype: str
         """
-        pass
+        raise NotImplementedError
 
     def score_prompt(self, state_dicts: List[Dict], **kwargs) -> str:
         """
@@ -850,7 +850,7 @@ Output:
         :return: The score prompt.
         :rtype: str
         """
-        pass
+        raise NotImplementedError
 
 
 class KeywordCountingParser(parser.Parser):

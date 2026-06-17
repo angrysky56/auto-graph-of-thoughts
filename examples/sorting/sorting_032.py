@@ -246,7 +246,7 @@ Merged list:
         :return: The improve prompt.
         :rtype: str
         """
-        pass
+        raise NotImplementedError
 
     def validation_prompt(self, **kwargs) -> str:
         """
@@ -256,7 +256,7 @@ Merged list:
         :return: The validation prompt.
         :rtype: str
         """
-        pass
+        raise NotImplementedError
 
     def score_prompt(self, state_dicts: List[Dict], **kwargs) -> str:
         """
@@ -269,7 +269,7 @@ Merged list:
         :return: The score prompt.
         :rtype: str
         """
-        pass
+        raise NotImplementedError
 
 
 class SortingParser(parser.Parser):

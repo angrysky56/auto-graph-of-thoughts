@@ -285,7 +285,7 @@ NDA <S{num}>:
         :return: The improve prompt.
         :rtype: str
         """
-        pass
+        raise NotImplementedError
 
     def validation_prompt(self, **kwargs) -> str:
         """
@@ -295,7 +295,7 @@ NDA <S{num}>:
         :return: The validation prompt.
         :rtype: str
         """
-        pass
+        raise NotImplementedError
 
 
 class DocMergeParser(parser.Parser):
