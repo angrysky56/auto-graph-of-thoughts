@@ -4,7 +4,7 @@
   <img src="paper/pics/preview.svg">
 </p>
 
-This is the official implementation of **[Graph of Thoughts: Solving Elaborate Problems with Large Language Models](https://arxiv.org/pdf/2308.09687.pdf)**.
+This is the un-official MCP Server implementation of **[Graph of Thoughts: Solving Elaborate Problems with Large Language Models](https://arxiv.org/pdf/2308.09687.pdf)**. Based on the original Github project [graph-of-thoughts](https://github.com/spcl/graph-of-thoughts)
 
 This modernized version enables solving complex problems by modeling them as a **Graph of Operations (GoO)**, which can be executed concurrently via an asynchronous engine. It features support for **OpenRouter** and **OpenAI**, and exposes a **Model Context Protocol (MCP)** server so that clients (like Claude, Gemini, or other agents) can dynamically build and execute graphs.
 
