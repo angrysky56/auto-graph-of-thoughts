@@ -10,15 +10,20 @@
 # main author: Nils Blach
 # contributions: Ales Kubicek
 
-import os
-import logging
+"""
+Keyword counting task implementation.
+"""
+
+import csv
 import datetime
 import json
-import csv
+import logging
+import os
 from collections import Counter
 from functools import partial
-from typing import Dict, List, Callable, Union
-from graph_of_thoughts import controller, language_models, operations, prompter, parser
+from typing import Callable, Dict, List, Union
+
+from graph_of_thoughts import controller, language_models, operations, parser, prompter
 
 
 def string_to_list(string: str) -> List[str]:
@@ -33,7 +38,8 @@ def string_to_list(string: str) -> List[str]:
     :raise AssertionError: If input string does not contain a list.
     """
 
-    assert string[0] == "[" and string[-1] == "]", "String is not a list."
+    if not (string[0] == "[" and string[-1] == "]"):
+        raise AssertionError("String is not a list.")
     return [
         item.strip().replace("'", "").replace('"', "")
         for item in string[1:-1].split(", ")
@@ -116,15 +122,15 @@ def num_errors(all_possible_countries: List[str], state: Dict) -> float:
             correct_freq_dict.keys()
         )
         # count the number of errors
-        num_errors = 0
+        err_count = 0
         for country in countries_not_in_current:
-            num_errors += abs(correct_freq_dict[country])
+            err_count += abs(correct_freq_dict[country])
         for country in countries_not_in_correct:
-            num_errors += abs(current_freq_dict[country])
+            err_count += abs(current_freq_dict[country])
         for country in set(correct_freq_dict.keys()) & set(current_freq_dict.keys()):
-            num_errors += abs(correct_freq_dict[country] - current_freq_dict[country])
-        return num_errors
-    except:
+            err_count += abs(correct_freq_dict[country] - current_freq_dict[country])
+        return err_count
+    except Exception:
         return 100
 
 
@@ -146,11 +152,11 @@ def test_keyword_counting(state: Dict) -> bool:
         if set(correct_freq_dict.keys()) != set(current_freq_dict.keys()):
             return False
         # check that the values are the same
-        for key in correct_freq_dict.keys():
-            if correct_freq_dict[key] != current_freq_dict[key]:
+        for key, val in correct_freq_dict.items():
+            if val != current_freq_dict[key]:
                 return False
         return True
-    except:
+    except Exception:
         return False
 
 
@@ -173,17 +179,17 @@ class KeywordCountingPrompter(prompter.Prompter):
 <Examples>
 Input:
 Alexandra boarded the first flight of her grand journey, starting from Canada. With a globe-trotting itinerary in hand, she was filled with excitement. Her first stop was Mexico, where she marveled at the Mayan ruins. From there, she explored the rainforests of Brazil and danced the tango in Argentina.
-Output: 
+Output:
 {{
     "Canada": 1,
     "Mexico": 1,
     "Brazil": 1,
-    "Argentina": 1    
+    "Argentina": 1
 }}
 
 Input:
 The adventure led him to the peaks of Peru where he trekked to see the mysteries of Machu Picchu. He then headed to Chile to gaze at the vastness of the Atacama Desert. A quick detour to Uruguay and Paraguay allowed him to experience the vibrancy of the local cultures before returning back to Canada through Peru, Brazil and Mexico.
-Output: 
+Output:
 {{
     "Peru": 2,
     "Chile": 1,
@@ -237,7 +243,7 @@ To count the frequency for each country follow these steps:
 Input:
 Alexandra boarded the first flight of her grand journey, starting from Canada. With a globe-trotting itinerary in hand, she was filled with excitement. Her first stop was Mexico, where she marveled at the Mayan ruins. From there, she explored the rainforests of Brazil and danced the tango in Argentina.
 Paragraphs:
-Alexandra boarded the first flight of her grand journey, starting from Canada. With a globe-trotting itinerary in hand, she was filled with excitement. 
+Alexandra boarded the first flight of her grand journey, starting from Canada. With a globe-trotting itinerary in hand, she was filled with excitement.
 
 Her first stop was Mexico, where she marveled at the Mayan ruins. From there, she explored the rainforests of Brazil and danced the tango in Argentina.
 Sublist frequencies:
@@ -250,7 +256,7 @@ Sublist frequencies:
     "Brazil": 1,
     "Argentina": 1
 }}
-Output: 
+Output:
 {{
     "Canada": 1,
     "Mexico": 1,
@@ -261,7 +267,7 @@ Output:
 Input:
 The adventure led him to the peaks of Peru where he trekked to see the mysteries of Machu Picchu. He then headed to Chile to gaze at the vastness of the Atacama Desert. A quick detour to Uruguay and Paraguay allowed him to experience the vibrancy of the local cultures before returning back to Canada through Peru, Brazil and Mexico.
 Paragraphs:
-The adventure led him to the peaks of Peru where he trekked to see the mysteries of Machu Picchu. He then headed to Chile to gaze at the vastness of the Atacama Desert. 
+The adventure led him to the peaks of Peru where he trekked to see the mysteries of Machu Picchu. He then headed to Chile to gaze at the vastness of the Atacama Desert.
 
 A quick detour to Uruguay and Paraguay allowed him to experience the vibrancy of the local cultures before returning back to Canada through Peru, Brazil and Mexico.
 Sublists:
@@ -278,7 +284,7 @@ Sublists:
     "Brazil": 1,
     "Mexico": 1
 }}
-Output: 
+Output:
 {{
     "Peru": 2,
     "Chile": 1,
@@ -292,11 +298,11 @@ Output:
 Input:
 Journeying westward, she admired the art in Italy and sipped coffee in France. The music of Spain and the history of Greece deepened her love for Europe. The Nordic beauty of Norway, Sweden, Finland, and Denmark took her breath away. She danced in Ireland, explored castles in Scotland, and marveled at the architecture in Germany and Russia. Italy, Norway, Sweden and Germany will always stay her favourite destinations to visit.
 Paragraphs:
-Journeying westward, she admired the art in Italy and sipped coffee in France. 
+Journeying westward, she admired the art in Italy and sipped coffee in France.
 
-The music of Spain and the history of Greece deepened her love for Europe. The Nordic beauty of Norway, Sweden, Finland, and Denmark took her breath away. 
+The music of Spain and the history of Greece deepened her love for Europe. The Nordic beauty of Norway, Sweden, Finland, and Denmark took her breath away.
 
-She danced in Ireland, explored castles in Scotland, and marveled at the architecture in Germany and Russia. 
+She danced in Ireland, explored castles in Scotland, and marveled at the architecture in Germany and Russia.
 
 Italy, Norway, Sweden and Germany will always stay her favourite destinations to visit.
 Sublists:
@@ -327,7 +333,7 @@ Sublists:
     "Sweden": 1,
     "Germany": 1
 }}
-Output: 
+Output:
 {{
     "Italy": 2,
     "France": 1,
@@ -366,10 +372,10 @@ To count the frequency for each country follow these steps:
 <Examples>
 Input:
 Alexandra explored the rainforests of Brazil and danced the tango in Argentina.
-Output: 
+Output:
 {{
     "Brazil": 1,
-    "Argentina": 1    
+    "Argentina": 1
 }}
 
 Input:
@@ -382,7 +388,7 @@ Output:
 
 Input:
 A quick detour to Uruguay and Paraguay allowed him to experience the vibrancy of the local cultures before returning back to Canada through Peru, Brazil and Mexico.
-Output: 
+Output:
 {{
     "Uruguay": 1,
     "Paraguay": 1,
@@ -428,7 +434,7 @@ Incorrect Dictionary:
     "Argentina": 1
 }}
 Reason: The input text names Brasil once but the incorrect dictionary does not contain Brasil at all, the remaining countries are correct.
-Output: 
+Output:
 {{
     "Canada": 1,
     "Mexico": 1,
@@ -450,7 +456,7 @@ Incorrect Dictionary:
     "Mexico": 1
 }}
 Reason: The input text names Peru twice, but the incorrect dictionary lists it with a frequency of 3 instead of 2. The incorrect dictionary also contains Argentina which does not appear in the input text.
-Output: 
+Output:
 {{
     "Peru": 2,
     "Chile": 1,
@@ -479,7 +485,7 @@ Incorrect Dictionary:
     "Russia": 1
 }}
 Reason: The input text names Italy, Norway, Sweden and Germany twice each, but the incorrect dictionary lists them with a frequency of 1 each instead of 2.
-Output: 
+Output:
 {{
     "Italy": 2,
     "France": 1,
@@ -496,9 +502,9 @@ Output:
 }}
 </Examples>
 
-Input: 
+Input:
 {input}
-Incorrect Dictionary: 
+Incorrect Dictionary:
 {incorrect_dict}
 """
 
@@ -515,7 +521,7 @@ To fix the incorrect dictionary of countries follow these steps:
 
 <Examples>
 Input:
-Alexandra boarded the first flight of her grand journey, starting from Canada. 
+Alexandra boarded the first flight of her grand journey, starting from Canada.
 Incorrect Dictionary:
 {{
     "Canada": 1,
@@ -523,7 +529,7 @@ Incorrect Dictionary:
     "Argentina": 1
 }}
 Reason: The input text only names Canada once, but the incorrect dictionary contains Mexico and Argentina which do not appear in the input text.
-Output: 
+Output:
 {{
     "Canada": 1
 }}
@@ -539,7 +545,7 @@ Incorrect Dictionary:
     "Mexico": 1
 }}
 Reason: The input text names Peru twice, but the incorrect dictionary lists it with a frequency of 3 instead of 2. The incorrect dictionary also contains Argentina which does not appear in the input text and is missing Paraguay.
-Output: 
+Output:
 {{
     "Peru": 2,
     "Paraguay": 1,
@@ -549,7 +555,7 @@ Output:
 }}
 
 Input:
-She danced in Ireland and Russia, explored castles in England, and marveled at the architecture in Germany and Russia. 
+She danced in Ireland and Russia, explored castles in England, and marveled at the architecture in Germany and Russia.
 Incorrect Dictionary:
 {{
     "Ireland": 1,
@@ -558,7 +564,7 @@ Incorrect Dictionary:
     "Russia": 1
 }}
 Reason: The input text names Russia twice each, but the incorrect dictionary lists Russia with a frequency of 1 instead of 2. The incorrect dictionary also contains England which does not appear in the input text and is missing Scotland.
-Output: 
+Output:
 {{
     "Ireland": 1,
     "Scotland": 1,
@@ -567,9 +573,9 @@ Output:
 }}
 </Examples>
 
-Input: 
+Input:
 {input}
-Incorrect Dictionary: 
+Incorrect Dictionary:
 {incorrect_dict}
 """
 
@@ -585,7 +591,7 @@ Only output the final 4 paragraphs in the following format without any additiona
 <Example>
 Input:
 Journeying westward, she admired the art in Italy and sipped coffee in France. The music of Spain and the history of Greece deepened her love for Europe. The Nordic beauty of Norway, Sweden, Finland, and Denmark took her breath away. She danced in Ireland, explored castles in Scotland, and marveled at the architecture in Germany and Russia. Italy, Norway, Sweden and Germany will always stay her favourite destinations to visit.
-Output: 
+Output:
 {{
     "Paragraph 1": "Journeying westward, she admired the art in Italy and sipped coffee in France. ",
     "Paragraph 2": "The music of Spain and the history of Greece deepened her love for Europe. The Nordic beauty of Norway, Sweden, Finland, and Denmark took her breath away.",
@@ -614,9 +620,9 @@ Only output the final 8 paragraphs in the following format without any additiona
 <Example>
 Input:
 Journeying westward, she admired the art in Italy and sipped coffee in France. The music of Spain and the history of Greece deepened her love for Europe. The Nordic beauty of Norway, Sweden, Finland, and Denmark took her breath away. She danced in Ireland, explored castles in Scotland, and marveled at the architecture in Germany and Russia. Italy, Norway, Sweden and Germany will always stay her favourite destinations to visit. However, nothing compared to her experiences in Egypt, where she began her journey as an archaeologist. One evening in Egypt, she discovered a mysterious artifact that existed not only in Egypt but also in distant lands like Peru and Canada. The artifact was said to harness the energy of the earth, which she only started believing when experiencing it while traveling in Sweden and Notway. A similar relic was rumored to exist in the bustling streets of Thailand and the snowy landscapes of Sweden.
-Output: 
+Output:
 {{
-Output: 
+Output:
     "Paragraph 1": "Journeying westward, she admired the art in Italy and sipped coffee in France. ",
     "Paragraph 2": "The music of Spain and the history of Greece deepened her love for Europe. The Nordic beauty of Norway, Sweden, Finland, and Denmark took her breath away. ",
     "Paragraph 3": "She danced in Ireland, explored castles in Scotland, and marveled at the architecture in Germany and Russia. ",
@@ -644,7 +650,7 @@ Output each sentence in the following format without any additional text or thou
 <Example>
 Input:
 Journeying westward, she admired the art in Italy and sipped coffee in France. The music of Spain and the history of Greece deepened her love for Europe. The Nordic beauty of Norway, Sweden, Finland, and Denmark took her breath away. She danced in Ireland, explored castles in Scotland, and marveled at the architecture in Germany and Russia. Italy, Norway, Sweden and Germany will always stay her favourite destinations to visit.
-Output: 
+Output:
 {{
     "Sentence 1": "Journeying westward, she admired the art in Italy and sipped coffee in France. ",
     "Sentence 2": "The music of Spain and the history of Greece deepened her love for Europe. "
@@ -677,7 +683,7 @@ Combine the following 2 dictionaries into a single dictionary:
 Combined Output:
 """
 
-    got_improve_aggregate_prompt = """<Instruction> The following 2 dictionaries were combined into the third dictionary below. 
+    got_improve_aggregate_prompt = """<Instruction> The following 2 dictionaries were combined into the third dictionary below.
 However, some mistakes occurred and the third dictionary is incorrect. Please fix the third dictionary so that it contains the correct frequencies for each country.
 The correct frequencies are the sum of the frequencies from the first 2 dictionaries. If a country is not present in one of the dictionaries, add it to the final dictionary with the frequency from the other dictionary.
 
@@ -739,7 +745,8 @@ Output:
         :rtype: str
         :raise AssertionError: If more than two thought states are provided.
         """
-        assert len(state_dicts) <= 2, "Expected 2 states for aggregation prompt."
+        if len(state_dicts) > 2:
+            raise AssertionError("Expected 2 states for aggregation prompt.")
         if len(state_dicts) == 0:
             state_dicts = [{"current": "{}"}, {"current": "{}"}]
         elif len(state_dicts) == 1:
@@ -748,54 +755,56 @@ Output:
             input1=state_dicts[0]["current"], input2=state_dicts[1]["current"]
         )
 
-    def generate_prompt(
-        self, num_branches: int, original: str, current: str, method: str, **kwargs
-    ) -> str:
+    def generate_prompt(self, num_branches: int, **kwargs) -> str:
         """
         Generate a generate prompt for the language model.
 
         :param num_branches: The number of responses the prompt should ask the LM to generate.
         :type num_branches: int
-        :param original: Input text.
-        :type original: str
-        :param current: Intermediate solution.
-        :type current: str
-        :param method: Method for which the generate prompt is generated.
-        :type method: str
-        :param kwargs: Additional keyword arguments.
+        :param kwargs: Additional keyword arguments. Must include:
+                       - original: Input text.
+                       - current: Intermediate solution.
+                       - method: Method for which the generate prompt is generated.
         :return: The generate prompt.
         :rtype: str
         :raise AssertionError: If the requested number of branches is not one.
         """
 
-        assert num_branches == 1, "Branching should be done via multiple requests."
+        original = kwargs.get("original", "")
+        current = kwargs.get("current", "")
+        method = kwargs.get("method", "")
+
+        if num_branches != 1:
+            raise AssertionError("Branching should be done via multiple requests.")
         if current is None or current == "":
-            input = original
+            inp_text = original
         else:
-            input = current
+            inp_text = current
         if method.startswith("io"):
-            return self.count_prompt.format(input=input)
+            return self.count_prompt.format(input=inp_text)
         elif method.startswith("cot"):
-            return self.count_prompt_cot.format(input=input)
+            return self.count_prompt_cot.format(input=inp_text)
         elif method.startswith("tot"):
             if current is None or current == "":
-                return self.count_prompt_cot.format(input=input)
+                return self.count_prompt_cot.format(input=inp_text)
             return self.tot_improve_prompt.format(
                 input=original,
                 incorrect_dict=current,
             )
         elif method.startswith("got"):
-            if (current is None or current == "") and kwargs["phase"] == 0:
+            if (current is None or current == "") and kwargs.get("phase") == 0:
                 if method == "got8":
-                    return self.got_split_prompt2.format(input=input)
+                    return self.got_split_prompt2.format(input=inp_text)
                 if method == "gotx":
-                    return self.got_split_prompt3.format(input=input)
-                return self.got_split_prompt.format(input=input)
+                    return self.got_split_prompt3.format(input=inp_text)
+                return self.got_split_prompt.format(input=inp_text)
 
-            if kwargs["phase"] == 1:
+            if kwargs.get("phase") == 1:
                 if method == "gotx":
-                    return self.count_prompt_sentence.format(input=kwargs["sub_text"])
-                return self.count_prompt_cot.format(input=kwargs["sub_text"])
+                    return self.count_prompt_sentence.format(
+                        input=kwargs.get("sub_text")
+                    )
+                return self.count_prompt_cot.format(input=kwargs.get("sub_text"))
 
             if (
                 "sub_text" in kwargs
@@ -811,20 +820,20 @@ Output:
                 input=original, incorrect_dict=current
             )
 
-    def improve_prompt(self, current: str, aggr1: str, aggr2: str, **kwargs) -> str:
+    def improve_prompt(self, **kwargs) -> str:
         """
         Generate an improve prompt for the language model.
 
-        :param current: Intermediate solution.
-        :type current: str
-        :param aggr1: Partially solution 1 before aggregation.
-        :type aggr1: str
-        :param aggr2: Partially solution 2 before aggregation.
-        :type aggr2: str
-        :param kwargs: Additional keyword arguments.
+        :param kwargs: Additional keyword arguments. Must include:
+                       - current: Intermediate solution.
+                       - aggr1: Partially solution 1 before aggregation.
+                       - aggr2: Partially solution 2 before aggregation.
         :return: The improve prompt.
         :rtype: str
         """
+        current = kwargs.get("current", "")
+        aggr1 = kwargs.get("aggr1", "")
+        aggr2 = kwargs.get("aggr2", "")
         return self.got_improve_aggregate_prompt.format(
             input1=aggr1, input2=aggr2, input3=current
         )
@@ -889,7 +898,7 @@ class KeywordCountingParser(parser.Parser):
         try:
             json.loads(text)
             return text
-        except:
+        except json.JSONDecodeError:
             return "{}"
 
     def parse_aggregation_answer(
@@ -907,7 +916,8 @@ class KeywordCountingParser(parser.Parser):
         :raise AssertionError: If more than two thought states are provided.
         """
 
-        assert len(states) <= 2, "Expected 2 states for aggregation answer."
+        if len(states) > 2:
+            raise AssertionError("Expected 2 states for aggregation answer.")
         if len(states) == 0:
             states = [
                 {"current": "{}", "sub_text": ""},
@@ -941,7 +951,8 @@ class KeywordCountingParser(parser.Parser):
         :raise AssertionError: If there is not exactly one response text.
         """
 
-        assert len(texts) == 1, "Expected 1 text for improve answer."
+        if len(texts) != 1:
+            raise AssertionError("Expected 1 text for improve answer.")
         text = texts[0]
         answer = self.strip_answer_json(text)
         new_state = state.copy()
@@ -972,12 +983,14 @@ class KeywordCountingParser(parser.Parser):
                     json_dict = json.loads(answer)
                     if len(json_dict.keys()) != 4 or len(json_dict.keys()) != 8:
                         logging.warning(
-                            f"Expected 4 or 8 paragraphs in json, but found {len(json_dict.keys())}."
+                            "Expected 4 or 8 paragraphs in json, but found %d.",
+                            len(json_dict.keys()),
                         )
                     for key, value in json_dict.items():
                         if "Paragraph" not in key and "Sentence" not in key:
                             logging.warning(
-                                f"Expected key to contain 'Paragraph' or 'Sentence', but found {key}."
+                                "Expected key to contain 'Paragraph' or 'Sentence', but found %s.",
+                                key,
                             )
                             continue
                         new_state = state.copy()
@@ -993,7 +1006,7 @@ class KeywordCountingParser(parser.Parser):
                     new_state["phase"] = 2
                     new_states.append(new_state)
             except Exception as e:
-                logging.error(f"Could not parse step answer: {text}. Error: {e}")
+                logging.error("Could not parse step answer: %s. Error: %s", text, e)
         return new_states
 
     def parse_validation_answer(self, state: Dict, texts: List[str]) -> bool:
@@ -1007,7 +1020,7 @@ class KeywordCountingParser(parser.Parser):
         :return: Whether the thought state is valid or not.
         :rtype: bool
         """
-        pass
+        raise NotImplementedError
 
     def parse_score_answer(self, states: List[Dict], texts: List[str]) -> List[float]:
         """
@@ -1020,7 +1033,7 @@ class KeywordCountingParser(parser.Parser):
         :return: The scores for the thought states.
         :rtype: List[float]
         """
-        pass
+        raise NotImplementedError
 
 
 def io(all_potential_countries) -> operations.GraphOfOperations:
@@ -1343,7 +1356,7 @@ def run(
     orig_budget = budget
     data_path = os.path.join(os.path.dirname(__file__), "countries.csv")
     data = []
-    with open(data_path, "r") as f:
+    with open(data_path, "r", encoding="utf-8") as f:
         reader = csv.reader(f)
         next(reader)
         for row in reader:
@@ -1373,7 +1386,7 @@ def run(
         "lm": lm_name,
         "budget": budget,
     }
-    with open(os.path.join(results_folder, "config.json"), "w") as f:
+    with open(os.path.join(results_folder, "config.json"), "w", encoding="utf-8") as f:
         json.dump(config, f)
 
     logging.basicConfig(
@@ -1388,18 +1401,19 @@ def run(
         os.makedirs(os.path.join(results_folder, method.__name__))
 
     for data in selected_data:
-        logging.info(f"Running data {data[0]}: {data[1]}")
+        logging.info("Running data %d: %s", data[0], data[1])
         if budget <= 0.0:
             logging.error(
-                f"Budget has been depleted, stopping. Data {data[0]} has not been run."
+                "Budget has been depleted, stopping. Data %d has not been run.", data[0]
             )
             break
         for method in methods:
-            logging.info(f"Running method {method.__name__}")
-            logging.info(f"Budget left: {budget}")
+            logging.info("Running method %s", method.__name__)
+            logging.info("Budget left: %f", budget)
             if budget <= 0.0:
                 logging.error(
-                    f"Budget has been depleted, stopping. Method {method.__name__} has not been run."
+                    "Budget has been depleted, stopping. Method %s has not been run.",
+                    method.__name__,
                 )
                 break
             lm = language_models.ChatGPT(
@@ -1427,7 +1441,7 @@ def run(
             try:
                 executor.run()
             except Exception as e:
-                logging.error(f"Exception: {e}")
+                logging.error("Exception: %s", e)
             path = os.path.join(
                 results_folder,
                 method.__name__,
@@ -1440,19 +1454,17 @@ def run(
 
 
 if __name__ == "__main__":
-    """
-    Input (x)   : an input text with many occurrences of different countries (names)
-    Output (y)  : dict of all countries in the input text with their frequencies
-    Correct     : y == correct given list of x (dataset)
-    Input Example:
-        The music of Spain and the history of Spain deepened her love for Europe...
-    Output Example:
-        {Spain: 2, ...}
-    """
-    budget = 30
-    samples = [item for item in range(0, 100)]
+    # Input (x)   : an input text with many occurrences of different countries (names)
+    # Output (y)  : dict of all countries in the input text with their frequencies
+    # Correct     : y == correct given list of x (dataset)
+    # Input Example:
+    #     The music of Spain and the history of Spain deepened her love for Europe...
+    # Output Example:
+    #     {Spain: 2, ...}
+    BUDGET = 30
+    samples = list(range(100))
     approaches = [io, cot, tot, tot2, got4, got8, gotx]
 
-    spent = run(samples, approaches, budget, "chatgpt")
+    spent = run(samples, approaches, BUDGET, "chatgpt")
 
-    logging.info(f"Spent {spent} out of {budget} budget.")
+    logging.info("Spent %f out of %f budget.", spent, BUDGET)

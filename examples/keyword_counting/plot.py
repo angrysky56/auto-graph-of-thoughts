@@ -7,12 +7,24 @@
 # main author: Nils Blach
 # contributions: Ales Kubicek
 
+"""
+Plotting results for keyword counting task.
+"""
+
 import json
 import os
+
 import matplotlib.pyplot as plt
+from dotenv import load_dotenv
+
+# Load environment variables from .env
+load_dotenv()
 
 
 def get_complete_results(base_directory):
+    """
+    Load all result JSON files from the base directory.
+    """
     results_complete = {}
     for folder_name in os.listdir(base_directory):
         folder_path = os.path.join(base_directory, folder_name)
@@ -21,12 +33,12 @@ def get_complete_results(base_directory):
             for file_name in os.listdir(folder_path):
                 if file_name.endswith(".json"):
                     file_path = os.path.join(folder_path, file_name)
-                    with open(file_path, "r") as f:
+                    with open(file_path, "r", encoding="utf-8") as f:
                         data = json.load(f)
                         results_complete[folder_name].append(
                             {"key": int(file_name.split(".")[0]), "data": data}
                         )
-        for key in results_complete.keys():
+        for key in results_complete:
             results_complete[key] = sorted(
                 results_complete[key], key=lambda x: x["key"]
             )
@@ -34,8 +46,11 @@ def get_complete_results(base_directory):
 
 
 def get_final_scores(results_complete):
+    """
+    Extract final scores, solved status, and cost from complete results.
+    """
     scores = {}
-    for method in results_complete.keys():
+    for method in results_complete:
         scores[method] = []
         for result in results_complete[method]:
             score = 100
@@ -48,7 +63,7 @@ def get_final_scores(results_complete):
                     try:
                         score = min(op["scores"])
                         solved = any(op["problem_solved"])
-                    except:
+                    except (KeyError, ValueError, TypeError):
                         continue
                 if "cost" in op:
                     cost = op["cost"]
@@ -62,22 +77,25 @@ def get_final_scores(results_complete):
 
 
 def get_plotting_data(base_directory):
+    """
+    Format score and cost data for plotting.
+    """
     results_complete = get_complete_results(base_directory)
     scores = get_final_scores(results_complete)
     results_plotting = {
         method: {
-            "scores": [x[1] for x in scores[method]],
-            "solved": sum([1 for x in scores[method] if x[2]]),
-            "costs": [x[5] for x in scores[method]],
+            "scores": [x[1] for x in method_scores],
+            "solved": sum([1 for x in method_scores if x[2]]),
+            "costs": [x[5] for x in method_scores],
         }
-        for method in scores.keys()
+        for method, method_scores in scores.items()
     }
     return results_plotting
 
 
 def plot_results(
     results,
-    methods_order=["io", "cot", "tot", "tot2", "got4", "got8", "gotx"],
+    methods_order=None,
     model="GPT-3.5",
     y_lower=0,
     y_upper=40,
@@ -87,6 +105,9 @@ def plot_results(
     display_left_ylabel=False,
     display_right_ylabel=False,
 ):
+    """
+    Generate and save boxplot comparison of errors and total costs.
+    """
     methods_order = [method for method in methods_order if method in results]
     # Extract scores based on the order
     scores_ordered = [
@@ -113,9 +134,9 @@ def plot_results(
     ax.set_ylim(y_lower, (y_upper + 2) if display_solved else y_upper + 1)
     plt.yticks(fontsize=fig_fontsize)
     if display_left_ylabel:
-        ax.set_ylabel(f"Number of errors; the lower the better", fontsize=fig_fontsize)
+        ax.set_ylabel("Number of errors; the lower the better", fontsize=fig_fontsize)
 
-    ax.set_title(f"Keyword Counting")
+    ax.set_title("Keyword Counting")
 
     ax2 = ax.twinx()
     ax2.bar(positions, total_costs, alpha=0.5, color="blue", label="Total Cost ($)")
@@ -151,15 +172,20 @@ def plot_results(
             )
             count += 1
 
-    model = model.replace(".", "").replace("-", "").lower()
-    fig.savefig(f"keyword_counting_{model}.pdf", bbox_inches="tight")
+    model_clean = model.split("/")[-1].replace(".", "").replace("-", "").lower()
+    fig.savefig(f"keyword_counting_{model_clean}.pdf", bbox_inches="tight")
 
+
+# Fetch model name from env
+env_model = os.getenv("OPENROUTER_MODEL_ID")
+if not env_model:
+    env_model = os.getenv("GOT_LANGUAGE_MODEL", "GPT-3.5")
 
 plot_results(
     get_plotting_data("results/"),
     display_solved=True,
     annotation_offset=-0.3,
-    model="GPT-3.5",
+    model=env_model,
     y_upper=35,
     display_left_ylabel=True,
     display_right_ylabel=True,

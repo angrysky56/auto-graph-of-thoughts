@@ -9,7 +9,7 @@ Asynchronous controller for Graph of Thoughts.
 """
 
 import asyncio
-from typing import Set
+from typing import Any, Set
 
 from graph_of_thoughts.operations import Operation
 
@@ -22,13 +22,23 @@ class AsyncController(Controller):
     generating the Graph Reasoning State asynchronously.
     """
 
-    async def run(self) -> None:  # type: ignore[override]
+    def run(self) -> Any:  # type: ignore[override]
+        """
+        Run the controller asynchronously.
+
+        :return: A coroutine that can be awaited.
+        :rtype: Coroutine
+        """
+        return self._run()
+
+    async def _run(self) -> None:
         """
         Run the controller asynchronously and execute the operations from the Graph of
         Operations concurrently based on their readiness (DAG topological order with parallelism).
         """
         self.logger.debug("Checking that the program is in a valid state")
-        assert self.graph.roots is not None, "The operations graph has no root"
+        if self.graph.roots is None:
+            raise AssertionError("The operations graph has no root")
         self.logger.debug("The program is in a valid state")
 
         # Reset executed flag to False before execution
@@ -74,9 +84,10 @@ class AsyncController(Controller):
 
                 # Check successors of the completed operation
                 for successor in completed_op.successors:
-                    assert (
-                        successor in self.graph.operations
-                    ), "The successor of an operation is not in the operations graph"
+                    if successor not in self.graph.operations:
+                        raise AssertionError(
+                            "The successor of an operation is not in the operations graph"
+                        )
 
                     if (
                         successor not in completed_operations

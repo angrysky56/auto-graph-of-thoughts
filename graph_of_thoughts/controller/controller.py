@@ -6,13 +6,19 @@
 #
 # main author: Nils Blach
 
+"""
+Controller module for executing operations in the Graph of Thoughts framework.
+This contains the synchronous Controller class that manages the execution queue.
+"""
+
 import json
 import logging
 from typing import List
+
 from graph_of_thoughts.language_models import AbstractLanguageModel
 from graph_of_thoughts.operations import GraphOfOperations, Thought
-from graph_of_thoughts.prompter import Prompter
 from graph_of_thoughts.parser import Parser
+from graph_of_thoughts.prompter import Prompter
 
 
 class Controller:
@@ -62,7 +68,8 @@ class Controller:
         :raises AssertionError: If the successor of an operation is not in the Graph of Operations.
         """
         self.logger.debug("Checking that the program is in a valid state")
-        assert self.graph.roots is not None, "The operations graph has no root"
+        if self.graph.roots is None:
+            raise AssertionError("The operations graph has no root")
         self.logger.debug("The program is in a valid state")
 
         execution_queue = [
@@ -79,9 +86,10 @@ class Controller:
             )
             self.logger.info("Operation %s executed", current_operation.operation_type)
             for operation in current_operation.successors:
-                assert (
-                    operation in self.graph.operations
-                ), "The successor of an operation is not in the operations graph"
+                if operation not in self.graph.operations:
+                    raise AssertionError(
+                        "The successor of an operation is not in the operations graph"
+                    )
                 if operation.can_be_executed():
                     execution_queue.append(operation)
         self.logger.info("All operations executed")
@@ -95,7 +103,8 @@ class Controller:
         :rtype: List[List[Thought]]
         :raises AssertionError: If the `run` method hasn't been executed yet.
         """
-        assert self.run_executed, "The run method has not been executed"
+        if not self.run_executed:
+            raise AssertionError("The run method has not been executed")
         return [operation.get_thoughts() for operation in self.graph.leaves]
 
     def output_graph(self, path: str) -> None:
@@ -148,5 +157,5 @@ class Controller:
             }
         )
 
-        with open(path, "w") as file:
+        with open(path, "w", encoding="utf-8") as file:
             file.write(json.dumps(output, indent=2))
