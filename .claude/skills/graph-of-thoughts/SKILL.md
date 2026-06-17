@@ -150,6 +150,13 @@ plus `{num_branches}` (generate) and `{state_dicts}` (score/aggregation).
 **Rule of thumb:** make `generate` templates emit JSON or a clean list and set
 `generate_type` accordingly — it's the most reliable to parse.
 
+**Verified runnable example:** `examples/custom_tasks/rag_antihallucination.json`
+is a complete, tested custom task (`generate×4 → score → keep_best_n(2) →
+aggregate → improve`). It demonstrates **working text-based scoring** — the
+`score` template tells the LLM to emit a single integer, the `DynamicParser`
+extracts it, and `keep_best_n` prunes on it. Copy it as the starting template
+for new custom tasks: edit `original`, the four templates, and the graph shape.
+
 ## Built-in tasks and their gotchas
 
 Built-ins: `sorting`, `keyword_counting`, `set_intersection`, `doc_merge`.

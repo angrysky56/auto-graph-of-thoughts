@@ -1,0 +1,27 @@
+{
+  "_comment": "Verified custom GoT task. Pass these fields to the MCP tool `execute_got_graph` (task_name='custom'), or to create_got_session + add_got_operation. Demonstrates working TEXT-BASED scoring (the LLM emits a number, DynamicParser extracts it, keep_best_n prunes on it) — the capability the built-in sorting/keyword/set_intersection tasks deliberately omit. Pattern: generate(x4) -> score -> keep_best_n(2) -> aggregate -> improve.",
+  "task_name": "custom",
+  "model_name": "openrouter",
+  "initial_parameters": {
+    "original": "Reduce hallucination in a production RAG (retrieval-augmented generation) system that answers questions over an internal company knowledge base",
+    "current": ""
+  },
+  "templates": {
+    "generate": "You are a senior ML systems engineer. Problem: {original}\nIdeas already on the table: {current}\nPropose ONE distinct, specific, non-obvious engineering strategy (2-3 sentences, concrete enough to implement). Output only the strategy text, no preamble.",
+    "score": "Rate the following strategy for reducing hallucination in a production RAG system on a 0-100 scale, where the score reflects (technical impact) x (implementation feasibility). Output ONLY an integer 0-100, nothing else.\nStrategy: {state_dicts}",
+    "aggregation": "Combine the best strategies below into ONE unified, coherent engineering plan (a tight paragraph) that sequences them sensibly and notes any synergy. Strategies: {state_dicts}",
+    "improve": "Improve this RAG anti-hallucination plan: make each step concrete (name techniques, metrics, and where it sits in the pipeline). Keep it to one focused paragraph. Output only the improved plan.\nCurrent plan: {current}"
+  },
+  "parser_spec": {
+    "generate_type": "default"
+  },
+  "graph_def": {
+    "nodes": [
+      {"id": "gen1",   "type": "generate",    "params": {"num_branches_prompt": 1, "num_branches_response": 4}},
+      {"id": "score1", "type": "score",       "predecessors": ["gen1"],   "params": {"num_samples": 1, "combined_scoring": false}},
+      {"id": "kb1",    "type": "keep_best_n", "predecessors": ["score1"], "params": {"n": 2, "higher_is_better": true}},
+      {"id": "agg1",   "type": "aggregate",   "predecessors": ["kb1"],    "params": {"num_responses": 1}},
+      {"id": "imp1",   "type": "improve",     "predecessors": ["agg1"],   "params": {}}
+    ]
+  }
+}
