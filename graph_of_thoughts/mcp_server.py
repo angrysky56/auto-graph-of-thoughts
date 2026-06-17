@@ -547,10 +547,12 @@ async def got_get_prompt(
         # some prompters expect original, current, method
         return prompter.generate_prompt(num_branches, **variables)
     elif p_type == "score":
-        state_dicts = variables.get("state_dicts", [])
+        # pop so state_dicts is not also splatted via **variables (would
+        # raise "got multiple values for argument 'state_dicts'").
+        state_dicts = variables.pop("state_dicts", [])
         return prompter.score_prompt(state_dicts, **variables)
     elif p_type == "aggregation":
-        state_dicts = variables.get("state_dicts", [])
+        state_dicts = variables.pop("state_dicts", [])
         return prompter.aggregation_prompt(state_dicts, **variables)
     elif p_type == "improve":
         return prompter.improve_prompt(**variables)
@@ -580,22 +582,30 @@ async def got_parse_response(
     variables = variables or {}
     _, parser = get_task_prompter_parser(task_name, spec=parser_spec)
 
+    # NOTE: several built-in parsers (sorting, keyword_counting,
+    # set_intersection) intentionally leave parse_score_answer unimplemented
+    # (they score with deterministic functions, not by parsing text), so it
+    # returns None. The tool's return type cannot be None, so we coerce None
+    # results to a sensible empty value per parse type. For text-based scoring
+    # use the "doc_merge" task or a custom task with a parser_spec.
     p_type = parse_type.lower()
     if p_type == "generate":
         state = variables.get("state", {})
-        return parser.parse_generate_answer(state, responses)
+        return parser.parse_generate_answer(state, responses) or []
     elif p_type == "score":
         states = variables.get("states", [])
-        return parser.parse_score_answer(states, responses)
+        return parser.parse_score_answer(states, responses) or []
     elif p_type == "aggregation":
         states = variables.get("states", [])
-        return parser.parse_aggregation_answer(states, responses)
+        result = parser.parse_aggregation_answer(states, responses)
+        return result if result is not None else {}
     elif p_type == "improve":
         state = variables.get("state", {})
-        return parser.parse_improve_answer(state, responses)
+        result = parser.parse_improve_answer(state, responses)
+        return result if result is not None else {}
     elif p_type == "validation":
         state = variables.get("state", {})
-        return parser.parse_validation_answer(state, responses)
+        return bool(parser.parse_validation_answer(state, responses))
     else:
         raise ValueError(f"Unknown parse type: {parse_type}")
 
