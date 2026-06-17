@@ -253,6 +253,7 @@ async def create_got_session(
     session_id = str(uuid.uuid4())
 
     import os
+
     if not model_name:
         model_name = os.getenv("GOT_LANGUAGE_MODEL", "chatgpt")
 
@@ -491,6 +492,7 @@ async def execute_got_graph(
     """
     # Create temporary session
     import os
+
     if not model_name:
         model_name = os.getenv("GOT_LANGUAGE_MODEL", "chatgpt")
 
@@ -601,8 +603,7 @@ async def got_parse_response(
         return result if result is not None else {}
     elif p_type == "improve":
         state = variables.get("state", {})
-        result = parser.parse_improve_answer(state, responses)
-        return result if result is not None else {}
+        return parser.parse_improve_answer(state, responses) or {}
     elif p_type == "validation":
         state = variables.get("state", {})
         return bool(parser.parse_validation_answer(state, responses))
