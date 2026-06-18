@@ -8,7 +8,7 @@ description: "Use the Graph of Thoughts (GoT) MCP server to solve elaborate prob
 Model reasoning as a **Graph of Operations (GoO)**: a DAG whose nodes transform
 "thoughts" (state dicts). The async engine runs independent branches
 concurrently. Use GoT when single-shot prompting is weak but the problem
-decomposes into *generate many candidates → score → prune → recombine*.
+decomposes into _generate many candidates → score → prune → recombine_.
 
 This skill targets the MCP server in this repo (`graph_of_thoughts.mcp_server`),
 exposed with the `mcp__graph-of-thought__*` tools.
@@ -22,21 +22,21 @@ exposed with the `mcp__graph-of-thought__*` tools.
    `add_got_operation` + `run_got_session` (build node-by-node).
 
 2. **Client-side (you, the agent, are the LLM).** The server only formats
-   prompts and parses responses; *you* produce the "thoughts." No API key
+   prompts and parses responses; _you_ produce the "thoughts." No API key
    needed, no cost. Use when you want to keep reasoning inside this model, or
    the server has no key. Tools: `got_get_prompt` then `got_parse_response`.
 
 ## Tool quick reference
 
-| Tool | Mode | Purpose |
-|------|------|---------|
-| `create_got_session` | server | Start a stateful session; returns `session_id`. |
-| `add_got_operation` | server | Append one operation node to a session's graph. |
-| `run_got_session` | server | Execute the session async; returns leaf thoughts + cost. Consumes (deletes) the session. |
-| `execute_got_graph` | server | Stateless: pass a full `graph_def` + params, run it, return results. |
-| `got_get_prompt` | client | Get the formatted prompt text for a step. |
-| `got_parse_response` | client | Parse your raw response text into structured state/score. |
-| `got_graph_metrics` | analysis | Graph-theoretic health of a `graph_def` (no execution). |
+| Tool                 | Mode     | Purpose                                                                                  |
+| -------------------- | -------- | ---------------------------------------------------------------------------------------- |
+| `create_got_session` | server   | Start a stateful session; returns `session_id`.                                          |
+| `add_got_operation`  | server   | Append one operation node to a session's graph.                                          |
+| `run_got_session`    | server   | Execute the session async; returns leaf thoughts + cost. Consumes (deletes) the session. |
+| `execute_got_graph`  | server   | Stateless: pass a full `graph_def` + params, run it, return results.                     |
+| `got_get_prompt`     | client   | Get the formatted prompt text for a step.                                                |
+| `got_parse_response` | client   | Parse your raw response text into structured state/score.                                |
+| `got_graph_metrics`  | analysis | Graph-theoretic health of a `graph_def` (no execution).                                  |
 
 Every `run_got_session` / `execute_got_graph` result also includes a
 `graph_metrics` block: density, global efficiency, characteristic path length,
@@ -122,13 +122,39 @@ Note: per-call cold judging needs the `temperature` override on the LM `query`
 {
   "task_name": "sorting",
   "model_name": "openrouter",
-  "initial_parameters": {"original": "[3,1,2,5,4,0,2,7]", "current": "", "phase": 0, "method": "io"},
-  "graph_def": {"nodes": [
-    {"id": "gen1",   "type": "generate",    "params": {"num_branches_prompt": 1, "num_branches_response": 3}},
-    {"id": "score1", "type": "score",       "predecessors": ["gen1"],   "params": {"scoring_function": "sorting_errors"}},
-    {"id": "kb1",    "type": "keep_best_n", "predecessors": ["score1"], "params": {"n": 1, "higher_is_better": false}},
-    {"id": "gt1",    "type": "ground_truth","predecessors": ["kb1"],    "params": {"eval_function": "test_sorting"}}
-  ]}
+  "initial_parameters": {
+    "original": "[3,1,2,5,4,0,2,7]",
+    "current": "",
+    "phase": 0,
+    "method": "io",
+  },
+  "graph_def": {
+    "nodes": [
+      {
+        "id": "gen1",
+        "type": "generate",
+        "params": { "num_branches_prompt": 1, "num_branches_response": 3 },
+      },
+      {
+        "id": "score1",
+        "type": "score",
+        "predecessors": ["gen1"],
+        "params": { "scoring_function": "sorting_errors" },
+      },
+      {
+        "id": "kb1",
+        "type": "keep_best_n",
+        "predecessors": ["score1"],
+        "params": { "n": 1, "higher_is_better": false },
+      },
+      {
+        "id": "gt1",
+        "type": "ground_truth",
+        "predecessors": ["kb1"],
+        "params": { "eval_function": "test_sorting" },
+      },
+    ],
+  },
 }
 ```
 
@@ -222,12 +248,12 @@ for new custom tasks: edit `original`, the four templates, and the graph shape.
 Built-ins: `sorting`, `keyword_counting`, `set_intersection`, `doc_merge`.
 
 - **Scoring is deterministic for `sorting`, `keyword_counting`,
-  `set_intersection`.** Their *parsers* intentionally do not parse scores from
+  `set_intersection`.** Their _parsers_ intentionally do not parse scores from
   text (`parse_score_answer` is a no-op). So in **server-side** mode give the
   `score` node a `scoring_function` (e.g. `sorting_errors`); in **client-side**
   mode `got_parse_response(parse_type="score")` returns `[]` for these tasks —
   compute the score yourself or use a custom task.
-- **`doc_merge`** *does* parse scores from text, so client-side scoring works.
+- **`doc_merge`** _does_ parse scores from text, so client-side scoring works.
 - Built-in `generate`/`aggregation`/`improve`/`validation` parsing works in
   client-side mode for all four tasks.
 
