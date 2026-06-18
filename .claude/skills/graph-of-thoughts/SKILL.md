@@ -36,6 +36,13 @@ exposed with the `mcp__graph-of-thought__*` tools.
 | `execute_got_graph` | server | Stateless: pass a full `graph_def` + params, run it, return results. |
 | `got_get_prompt` | client | Get the formatted prompt text for a step. |
 | `got_parse_response` | client | Parse your raw response text into structured state/score. |
+| `got_graph_metrics` | analysis | Graph-theoretic health of a `graph_def` (no execution). |
+
+Every `run_got_session` / `execute_got_graph` result also includes a
+`graph_metrics` block: density, global efficiency, characteristic path length,
+diameter, clustering, hub (betweenness) reliance, roots/leaves, depth, and
+plain-language notes — the connectome toolkit pointed at the reasoning DAG, to
+flag inefficient layouts or over-reliance on a single hub.
 
 ## Operation types (for `add_got_operation` / `graph_def` nodes)
 

@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from dotenv import load_dotenv
 from mcp.server.fastmcp import Context, FastMCP
 
-from graph_of_thoughts import controller, language_models, operations
+from graph_of_thoughts import controller, diagnostics, language_models, operations
 from graph_of_thoughts.parser import Parser
 from graph_of_thoughts.prompter import Prompter
 
@@ -251,7 +251,11 @@ def _build_utility_lm(config_path: str, utility_model_id: str = ""):
     try:
         lm = language_models.OpenRouter(config_path, model_name="openrouter")
         lm.model_id = model_id
-        logger.info("Utility LM configured: %s", model_id)
+        # Headroom: many "small" models (e.g. gpt-oss) are reasoning models and
+        # spend tokens thinking before the final answer; too small a budget
+        # truncates to empty content. Ensure room for reasoning + a short answer.
+        lm.max_tokens = max(getattr(lm, "max_tokens", 1024) or 1024, 4096)
+        logger.info("Utility LM configured: %s (max_tokens=%d)", model_id, lm.max_tokens)
         return lm
     except Exception:  # pragma: no cover - utility model is optional
         logger.warning("Could not build utility LM '%s'; using primary", model_id)
@@ -574,6 +578,12 @@ async def run_got_session(session_id: str, ctx: Context | None = None) -> dict:
         "cost": lm.cost,
     }
 
+    # Graph-theoretic health diagnostics of the reasoning DAG that just ran.
+    try:
+        result["graph_metrics"] = diagnostics.metrics_from_operations(graph)
+    except Exception:  # pragma: no cover - diagnostics are best-effort
+        logger.warning("Could not compute graph metrics", exc_info=True)
+
     # Remove session from registry to free memory
     del sessions[session_id]
 
@@ -645,6 +655,25 @@ async def execute_got_graph(
 
     # Run session and return results (forward ctx so progress is emitted)
     return await run_got_session(session_id, ctx=ctx)
+
+
+@mcp.tool()
+async def got_graph_metrics(graph_def: dict) -> dict:
+    """
+    Compute graph-theoretic health diagnostics for a proposed graph_def WITHOUT
+    executing it (no LLM calls).
+
+    Returns density, global efficiency, characteristic path length, diameter,
+    clustering, hub (betweenness) concentration / reliance, roots/leaves, depth,
+    and plain-language notes. Use it to sanity-check a reasoning graph's topology
+    before running it — e.g. to catch an inefficient layout or over-reliance on a
+    single aggregation hub.
+
+    :param graph_def: Same {"nodes": [{"id", "type", "predecessors"}, ...]} shape
+                      passed to execute_got_graph.
+    :return: A dict of metrics and interpretive notes.
+    """
+    return diagnostics.metrics_from_graph_def(graph_def)
 
 
 @mcp.tool()

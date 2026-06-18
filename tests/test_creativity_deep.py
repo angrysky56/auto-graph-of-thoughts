@@ -83,7 +83,8 @@ def test_none_content_is_coerced_not_crashing():
     op = ComparativeScore(scale=10.0)
     op.add_predecessor(StubPredecessor([Thought({"current": "a", "original": "p"})]))
     op._execute(lm, None, None)
-    assert op.get_thoughts()[0].state["_quality"] == 0.0
+    # None content -> coerced to "" -> no numbers -> neutral 0.5 (not a crash)
+    assert op.get_thoughts()[0].state["_quality"] == 0.5
 
 
 def test_divergent_generate_commits_when_diverse():
@@ -162,6 +163,23 @@ def test_comparative_uses_utility_lm_when_set():
     op._execute(primary, None, None)
     quals = [t.state["_quality"] for t in op.get_thoughts()]
     assert quals == [pytest.approx(1.0)] * 3  # utility LM's scores were used
+
+
+def test_comparative_neutral_fallback_on_parse_failure():
+    # utility model returns no numbers -> neutral 0.5, never silent zeros
+    lm = FakeLM(lambda p: "the model rambled with no usable scores")
+    op = ComparativeScore(scale=10.0)
+    op.add_predecessor(
+        StubPredecessor(
+            [
+                Thought({"current": "a", "original": "p"}),
+                Thought({"current": "b", "original": "p"}),
+            ]
+        )
+    )
+    op._execute(lm, None, None)
+    quals = [t.state["_quality"] for t in op.get_thoughts()]
+    assert quals == [pytest.approx(0.5)] * 2
 
 
 def test_multi_persona_judge_majority_vote():

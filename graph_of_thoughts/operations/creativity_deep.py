@@ -323,7 +323,20 @@ class ComparativeScore(Operation):
         )
         nums = [float(x) for x in _NUM_RE.findall(raw)]
         if len(nums) < len(texts):
-            nums += [0.0] * (len(texts) - len(nums))
+            # Parse failure (e.g. a reasoning model returned empty/odd content):
+            # fill with a NEUTRAL mid score, not 0, so selection isn't silently
+            # zeroed out and keep_pareto's floor still behaves sensibly.
+            missing = len(texts) - len(nums)
+            self.logger.warning(
+                "ComparativeScore: parsed %d/%d scores from utility model; "
+                "filling %d with neutral %.1f (raw=%r)",
+                len(nums),
+                len(texts),
+                missing,
+                self.scale * 0.5,
+                raw[:120],
+            )
+            nums += [self.scale * 0.5] * missing
 
         for thought, raw_score in zip(previous, nums[: len(texts)], strict=False):
             quality = max(0.0, min(1.0, raw_score / self.scale))
