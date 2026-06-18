@@ -145,6 +145,25 @@ def test_comparative_score_normalises_relative_scores():
     assert quals == [pytest.approx(0.8), pytest.approx(0.4), pytest.approx(1.0)]
 
 
+def test_comparative_uses_utility_lm_when_set():
+    primary = FakeLM(lambda p: "[0, 0, 0]")  # must NOT be used for scoring
+    utility = FakeLM(lambda p: "[10, 10, 10]")
+    op = ComparativeScore(scale=10.0)
+    op.utility_lm = utility
+    op.add_predecessor(
+        StubPredecessor(
+            [
+                Thought({"current": "a", "original": "p"}),
+                Thought({"current": "b", "original": "p"}),
+                Thought({"current": "c", "original": "p"}),
+            ]
+        )
+    )
+    op._execute(primary, None, None)
+    quals = [t.state["_quality"] for t in op.get_thoughts()]
+    assert quals == [pytest.approx(1.0)] * 3  # utility LM's scores were used
+
+
 def test_multi_persona_judge_majority_vote():
     # every persona: criterion 1 & 2 YES, criterion 3 NO -> 2/3 pass
     lm = FakeLM(lambda p: "1. [[YES]]\n2. [[YES]]\n3. [[NO]]")

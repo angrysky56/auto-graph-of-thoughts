@@ -230,6 +230,38 @@ def get_task_prompter_parser(
         return DynamicPrompter(templates or {}), DynamicParser(spec or {})
 
 
+def _build_utility_lm(config_path: str, utility_model_id: str = ""):
+    """
+    Build an optional fast 'utility' language model for the cheap, high-volume
+    structured calls (semantic clustering, comparative scoring) while the
+    primary model handles generation / improvement / final judging.
+
+    The model id comes from the ``utility_model_id`` argument or the
+    ``GOT_UTILITY_MODEL_ID`` env var (e.g. "openai/gpt-oss-20b"). It reuses the
+    OpenRouter config (API key, temperature, max_tokens) and overrides only the
+    model id, so ``OPENROUTER_MODEL_ID`` still governs the primary model.
+    Returns None when no utility model is configured (ops then fall back to the
+    primary LM).
+    """
+    import os
+
+    model_id = utility_model_id or os.getenv("GOT_UTILITY_MODEL_ID", "")
+    if not model_id:
+        return None
+    try:
+        lm = language_models.OpenRouter(config_path, model_name="openrouter")
+        lm.model_id = model_id
+        logger.info("Utility LM configured: %s", model_id)
+        return lm
+    except Exception:  # pragma: no cover - utility model is optional
+        logger.warning("Could not build utility LM '%s'; using primary", model_id)
+        return None
+
+
+# Operation types whose cheap structured calls can run on the utility LM.
+_UTILITY_OP_TYPES = {"divergent_generate", "comparative_score", "novelty_score"}
+
+
 # MCP Tools definition
 
 
@@ -241,6 +273,7 @@ async def create_got_session(
     model_name: str = "",
     templates: Optional[dict] = None,
     parser_spec: Optional[dict] = None,
+    utility_model_id: str = "",
 ) -> str:
     """
     Create a stateful Graph of Thoughts session.
@@ -269,6 +302,9 @@ async def create_got_session(
     # Get Prompter and Parser
     prompter, parser = get_task_prompter_parser(task_name, parser_spec, templates)
 
+    # Optional fast utility model for cheap structured calls.
+    utility_lm = _build_utility_lm(config_path, utility_model_id)
+
     # Initialize Operations Graph
     graph = operations.GraphOfOperations()
 
@@ -276,6 +312,7 @@ async def create_got_session(
     sessions[session_id] = {
         "graph": graph,
         "lm": lm,
+        "utility_lm": utility_lm,
         "prompter": prompter,
         "parser": parser,
         "initial_params": initial_parameters,
@@ -438,6 +475,16 @@ async def add_got_operation(
     else:
         raise ValueError(f"Unknown operation type: {op_type}")
 
+    # Attach the session's fast utility LM to ops whose cheap structured calls
+    # should run on it (clustering / comparative scoring); others stay primary.
+    session_utility_lm = session.get("utility_lm")
+    if (
+        session_utility_lm is not None
+        and op_type in _UTILITY_OP_TYPES
+        and hasattr(op, "utility_lm")
+    ):
+        op.utility_lm = session_utility_lm
+
     # Set predecessors if any
     if predecessor_ids:
         for pred_id in predecessor_ids:
@@ -542,6 +589,7 @@ async def execute_got_graph(
     model_name: str = "",
     templates: Optional[dict] = None,
     parser_spec: Optional[dict] = None,
+    utility_model_id: str = "",
     ctx: Context | None = None,
 ) -> dict:
     """
@@ -576,6 +624,7 @@ async def execute_got_graph(
         model_name=model_name,
         templates=templates,
         parser_spec=parser_spec,
+        utility_model_id=utility_model_id,
     )
 
     # Add operations

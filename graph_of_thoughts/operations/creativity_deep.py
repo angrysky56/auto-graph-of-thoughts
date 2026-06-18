@@ -181,6 +181,9 @@ class DivergentGenerate(Operation):
         self.diversity_threshold = diversity_threshold
         self.novelty_eps = novelty_eps
         self.novelty_axis = novelty_axis
+        # Optional fast "utility" LM for the cheap structured call (clustering);
+        # falls back to the primary LM when unset.
+        self.utility_lm: AbstractLanguageModel | None = None
         self.thoughts: List[Thought] = []
 
     def get_thoughts(self) -> List[Thought]:
@@ -200,6 +203,7 @@ class DivergentGenerate(Operation):
         if not previous and self.predecessors:
             return
         bases = previous if previous else [Thought(state=kwargs)]
+        ulm = self.utility_lm or lm  # cheap clustering on the utility model
 
         for base in bases:
             base_state = base.state
@@ -215,7 +219,7 @@ class DivergentGenerate(Operation):
                     for new_state in parser.parse_generate_answer(base_state, [raw]):
                         merged = {**base_state, **new_state}
                         texts.append(answer_text(merged))
-                cluster_ids = await cluster_semantic_single_call(lm, texts)
+                cluster_ids = await cluster_semantic_single_call(ulm, texts)
                 novelty = novelty_from_clusters(cluster_ids)
                 self.logger.info(
                     "DivergentGenerate op %d round %d: %d candidates, %d classes, "
@@ -276,6 +280,8 @@ class ComparativeScore(Operation):
         self.axis = axis
         self.problem_key = problem_key
         self.scale = float(scale)
+        # Optional fast "utility" LM for the single relative-scoring call.
+        self.utility_lm: AbstractLanguageModel | None = None
         self.thoughts: List[Thought] = []
 
     def get_thoughts(self) -> List[Thought]:
@@ -311,7 +317,10 @@ class ComparativeScore(Operation):
         if isinstance(previous[0].state, dict):
             problem = str(previous[0].state.get(self.problem_key, ""))
 
-        raw = await _aquery_one(lm, self._build_prompt(problem, texts), temperature=0.0)
+        ulm = self.utility_lm or lm  # relative scoring on the utility model
+        raw = await _aquery_one(
+            ulm, self._build_prompt(problem, texts), temperature=0.0
+        )
         nums = [float(x) for x in _NUM_RE.findall(raw)]
         if len(nums) < len(texts):
             nums += [0.0] * (len(texts) - len(nums))

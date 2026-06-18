@@ -216,6 +216,8 @@ class NoveltyScore(Operation):
     def __init__(self, axis: str = "_novelty") -> None:
         super().__init__()
         self.axis = axis
+        # Optional fast "utility" LM for the entailment clustering calls.
+        self.utility_lm: AbstractLanguageModel | None = None
         self.thoughts: List[Thought] = []
 
     def get_thoughts(self) -> List[Thought]:
@@ -232,7 +234,7 @@ class NoveltyScore(Operation):
         if not previous:
             return
         texts = [answer_text(t.state) for t in previous]
-        cluster_ids = cluster_by_entailment(lm, texts)
+        cluster_ids = cluster_by_entailment(self.utility_lm or lm, texts)
         novelties = novelty_from_clusters(cluster_ids)
         self.logger.info(
             "NoveltyScore op %d: %d thoughts -> %d semantic classes (entropy=%.3f)",
