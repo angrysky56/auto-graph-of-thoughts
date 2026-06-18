@@ -1,0 +1,25 @@
+{
+  "_comment": "Deeper creativity-selection pipeline for execute_got_graph (task_name='custom'). Ports the 'beyond the paper' design natively into GoT: set-level divergence with an explore/commit controller, set-RELATIVE quality (judging candidates in isolation is a weak signal), Pareto selection with an anti-Goodhart floor, and a concurrent multi-persona final judge. All ops are async/concurrent and cluster in a single call, so they stay within MCP timeouts against slow remote models. Novelty method credited in-code to the ACL 2026 creativity-evaluation paper; implementation is original and API-only.",
+  "task_name": "custom",
+  "model_name": "openrouter",
+  "initial_parameters": {
+    "original": "Propose an unconventional, specific way to get strangers in a neighborhood to start talking to each other",
+    "current": ""
+  },
+  "templates": {
+    "generate": "Problem: {original}\nIdeas so far: {current}\nPropose ONE unconventional, specific idea in a single sentence, using a mechanism unlike the common suggestions. Output only the idea, no preamble.",
+    "improve": "Make this idea concrete and actionable: in 2 sentences say exactly how it would be done. Output only the improved idea.\nIdea: {current}"
+  },
+  "parser_spec": {
+    "generate_type": "default"
+  },
+  "graph_def": {
+    "nodes": [
+      {"id": "gen1",   "type": "divergent_generate", "params": {"k": 5, "max_rounds": 2, "base_temperature": 0.8, "diversity_threshold": 0.34}},
+      {"id": "cmp1",   "type": "comparative_score",   "predecessors": ["gen1"], "params": {"criteria": ["feasibility", "effectiveness", "insightfulness"], "scale": 10}},
+      {"id": "kp1",    "type": "keep_pareto",         "predecessors": ["cmp1"], "params": {"axes": ["_novelty", "_quality"], "floor_axis": "_quality", "floor": 0.4, "n": 3}},
+      {"id": "judge1", "type": "multi_persona_judge", "predecessors": ["kp1"],  "params": {"criteria": ["feasibility", "effectiveness", "originality"]}},
+      {"id": "imp1",   "type": "improve",             "predecessors": ["judge1"], "params": {}}
+    ]
+  }
+}

@@ -91,7 +91,9 @@ def _clone_with_state(thought: Thought) -> Thought:
     """Clone a thought with a shallow-copied state so axis writes do not mutate
     the predecessor's shared state dict."""
     new_thought = Thought.from_thought(thought)
-    new_thought.state = {**thought.state} if isinstance(thought.state, dict) else thought.state
+    new_thought.state = (
+        {**thought.state} if isinstance(thought.state, dict) else thought.state
+    )
     return new_thought
 
 
@@ -106,12 +108,14 @@ def _query_one(
     """
     try:
         responses = lm.get_response_texts(
+            # pyrefly: ignore [unexpected-keyword]
             lm.query(prompt, num_responses=1, temperature=temperature)
         )
     except TypeError:
         # Backend without the temperature override.
         responses = lm.get_response_texts(lm.query(prompt, num_responses=1))
-    return responses[0] if responses else ""
+    # coerce a possible None content to "" so parsers never see None
+    return (responses[0] if responses else "") or ""
 
 
 # ----------------------------------------------------------------------------
@@ -127,9 +131,7 @@ _ENTAIL_TMPL = (
 )
 
 
-def bidirectional_entailment(
-    lm: AbstractLanguageModel, a: str, b: str
-) -> bool:
+def bidirectional_entailment(lm: AbstractLanguageModel, a: str, b: str) -> bool:
     """Return True if a and b are judged to express the same idea (both
     directions), using the graph's own LLM as the judge.
 
@@ -143,9 +145,7 @@ def bidirectional_entailment(
     return "yes" in text and "no" not in text.split()
 
 
-def cluster_by_entailment(
-    lm: AbstractLanguageModel, texts: List[str]
-) -> List[int]:
+def cluster_by_entailment(lm: AbstractLanguageModel, texts: List[str]) -> List[int]:
     """Greedy bidirectional-entailment clustering.
 
     Each text joins the first existing class whose representative it is
@@ -170,8 +170,10 @@ def cluster_by_entailment(
 def novelty_from_clusters(cluster_ids: List[int]) -> List[float]:
     """Per-item novelty = normalised surprisal of the item's semantic class.
 
-    A singleton class scores ~1.0 (maximally novel); membership in the large
-    modal class scores near 0. Normalised by ``ln(N)`` so values lie in [0, 1].
+    Normalised by the *maximum* surprisal present in the set, so the rarest
+    class scores 1.0 and the modal class scores lowest (0 when only one class).
+    This matches the creativity-evaluation reference implementation (relative,
+    set-internal novelty) rather than an absolute ``ln(N)`` scale.
     """
     n = len(cluster_ids)
     if n <= 1:
@@ -179,13 +181,11 @@ def novelty_from_clusters(cluster_ids: List[int]) -> List[float]:
     sizes: Dict[int, int] = {}
     for cid in cluster_ids:
         sizes[cid] = sizes.get(cid, 0) + 1
-    denom = math.log(n)
-    out: List[float] = []
-    for cid in cluster_ids:
-        p = sizes[cid] / n
-        surprisal = -math.log(p)
-        out.append(min(1.0, surprisal / denom) if denom > 0 else 0.0)
-    return out
+    surprisal = {cid: -math.log(size / n) for cid, size in sizes.items()}
+    max_surprisal = max(surprisal.values())
+    if max_surprisal <= 0:
+        return [0.0] * n
+    return [surprisal[cid] / max_surprisal for cid in cluster_ids]
 
 
 def semantic_entropy(cluster_ids: List[int]) -> float:
@@ -225,7 +225,9 @@ class NoveltyScore(Operation):
         self, lm: AbstractLanguageModel, prompter: Prompter, parser: Parser, **kwargs
     ) -> None:
         if len(self.predecessors) < 1:
-            raise AssertionError("NoveltyScore operation needs at least one predecessor")
+            raise AssertionError(
+                "NoveltyScore operation needs at least one predecessor"
+            )
         previous = self.get_previous_thoughts()
         if not previous:
             return
@@ -279,9 +281,7 @@ class RubricScore(Operation):
         return self.thoughts
 
     def _build_prompt(self, problem: str, answer: str) -> str:
-        lines = "\n".join(
-            f"{i + 1}. {c}" for i, c in enumerate(self.criteria)
-        )
+        lines = "\n".join(f"{i + 1}. {c}" for i, c in enumerate(self.criteria))
         return (
             "You are a strict evaluator. Judge the ANSWER against each "
             "criterion independently.\n"
@@ -376,15 +376,17 @@ class KeepPareto(Operation):
     @staticmethod
     def _dominates(a: List[float], b: List[float]) -> bool:
         """True if a dominates b (>= on all, > on at least one)."""
-        return all(x >= y for x, y in zip(a, b)) and any(
-            x > y for x, y in zip(a, b)
+        return all(x >= y for x, y in zip(a, b, strict=False)) and any(
+            x > y for x, y in zip(a, b, strict=False)
         )
 
     def _execute(
         self, lm: AbstractLanguageModel, prompter: Prompter, parser: Parser, **kwargs
     ) -> None:
         if len(self.predecessors) < 1:
-            raise AssertionError("KeepPareto operation must have at least one predecessor")
+            raise AssertionError(
+                "KeepPareto operation must have at least one predecessor"
+            )
         previous = self.get_previous_thoughts()
         if not previous:
             return
@@ -415,15 +417,17 @@ class KeepPareto(Operation):
             t
             for i, t in enumerate(survivors)
             if not any(
-                self._dominates(vecs[j], vecs[i]) for j in range(len(survivors)) if j != i
+                self._dominates(vecs[j], vecs[i])
+                for j in range(len(survivors))
+                if j != i
             )
         ]
 
         # 3) optional cap by axis sum
         if self.n is not None and len(frontier) > self.n:
-            frontier = sorted(
-                frontier, key=lambda t: sum(self._vec(t)), reverse=True
-            )[: self.n]
+            frontier = sorted(frontier, key=lambda t: sum(self._vec(t)), reverse=True)[
+                : self.n
+            ]
 
         self.thoughts = [_clone_with_state(t) for t in frontier]
         self.logger.info(

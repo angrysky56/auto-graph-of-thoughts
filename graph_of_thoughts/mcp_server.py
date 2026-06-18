@@ -12,7 +12,7 @@ from functools import partial
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from dotenv import load_dotenv
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 
 from graph_of_thoughts import controller, language_models, operations
 from graph_of_thoughts.parser import Parser
@@ -373,6 +373,35 @@ async def add_got_operation(
             floor=params.get("floor", 0.5),
             n=params.get("n"),
         )
+    elif op_type == "divergent_generate":
+        # explore/commit generator: concurrent sampling + set-level novelty,
+        # escalating temperature until the candidate set spreads.
+        op = operations.DivergentGenerate(
+            k=params.get("k", 5),
+            max_rounds=params.get("max_rounds", 2),
+            base_temperature=params.get("base_temperature", 0.7),
+            temperature_step=params.get("temperature_step", 0.3),
+            max_temperature=params.get("max_temperature", 1.5),
+            diversity_threshold=params.get("diversity_threshold", 0.34),
+            novelty_eps=params.get("novelty_eps", 0.05),
+            novelty_axis=params.get("novelty_axis", "_novelty"),
+        )
+    elif op_type == "comparative_score":
+        # set-relative quality: ONE call scores all candidates against each other.
+        op = operations.ComparativeScore(
+            criteria=params.get("criteria"),
+            axis=params.get("axis", "_quality"),
+            problem_key=params.get("problem_key", "original"),
+            scale=params.get("scale", 10.0),
+        )
+    elif op_type == "multi_persona_judge":
+        # concurrent multi-critic final judge -> aggregated quality axis.
+        op = operations.MultiPersonaJudge(
+            criteria=params.get("criteria"),
+            personas=params.get("personas"),
+            axis=params.get("axis", "_quality"),
+            problem_key=params.get("problem_key", "original"),
+        )
     elif op_type == "aggregate":
         op = operations.Aggregate(
             num_responses=params.get("num_responses", 1),
@@ -426,11 +455,16 @@ async def add_got_operation(
 
 
 @mcp.tool()
-async def run_got_session(session_id: str) -> dict:
+async def run_got_session(session_id: str, ctx: Context | None = None) -> dict:
     """
     Run the Graph of Thoughts session asynchronously and return leaf thoughts and cost details.
 
+    Emits MCP progress notifications after each operation completes; clients that
+    honour progress will reset their request timeout, so long graphs do not time
+    out.
+
     :param session_id: The ID of the session.
+    :param ctx: Injected FastMCP context (used for progress reporting).
     :return: A dictionary of results and stats.
     """
     if session_id not in sessions:
@@ -452,8 +486,18 @@ async def run_got_session(session_id: str) -> dict:
         problem_parameters=initial_params,
     )
 
+    async def _progress(done: int, total: int, op) -> None:
+        if ctx is None:
+            return
+        op_name = getattr(op.operation_type, "name", str(op.operation_type))
+        try:
+            await ctx.report_progress(progress=done, total=total)
+            await ctx.info(f"[{done}/{total}] {op_name} (op {op.id}) completed")
+        except Exception:  # progress is best-effort
+            pass
+
     logger.info("Running GoT session: %s", session_id)
-    await ctrl.run()
+    await ctrl.run(progress_callback=_progress)
 
     # Gather final thoughts
     final_thoughts = []
@@ -498,6 +542,7 @@ async def execute_got_graph(
     model_name: str = "",
     templates: Optional[dict] = None,
     parser_spec: Optional[dict] = None,
+    ctx: Context | None = None,
 ) -> dict:
     """
     Execute a Graph of Thoughts graph in a single stateless tool call.
@@ -549,8 +594,8 @@ async def execute_got_graph(
             params=params,
         )
 
-    # Run session and return results
-    return await run_got_session(session_id)
+    # Run session and return results (forward ctx so progress is emitted)
+    return await run_got_session(session_id, ctx=ctx)
 
 
 @mcp.tool()

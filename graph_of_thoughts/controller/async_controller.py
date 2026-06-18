@@ -9,11 +9,15 @@ Asynchronous controller for Graph of Thoughts.
 """
 
 import asyncio
-from typing import Any, Set
+from typing import Any, Awaitable, Callable, Optional, Set
 
 from graph_of_thoughts.operations import Operation
 
 from .controller import Controller
+
+# Called after each operation completes, with (completed_count, total_count,
+# operation). May be a coroutine; it is awaited if so. Used to emit progress.
+ProgressCallback = Callable[[int, int, Operation], Optional[Awaitable[None]]]
 
 
 class AsyncController(Controller):
@@ -22,16 +26,20 @@ class AsyncController(Controller):
     generating the Graph Reasoning State asynchronously.
     """
 
-    def run(self) -> Any:  # type: ignore[override]
+    def run(self, progress_callback: Optional[ProgressCallback] = None) -> Any:  # type: ignore[override]
         """
         Run the controller asynchronously.
 
+        :param progress_callback: Optional callback invoked after each operation
+                                  completes, with (completed, total, operation).
+                                  May be sync or async. Used to emit progress so
+                                  long graphs do not trip client request timeouts.
         :return: A coroutine that can be awaited.
         :rtype: Coroutine
         """
-        return self._run()
+        return self._run(progress_callback)
 
-    async def _run(self) -> None:
+    async def _run(self, progress_callback: Optional[ProgressCallback] = None) -> None:
         """
         Run the controller asynchronously and execute the operations from the Graph of
         Operations concurrently based on their readiness (DAG topological order with parallelism).
@@ -48,6 +56,8 @@ class AsyncController(Controller):
         completed_operations: Set[Operation] = set()
         queued_operations: Set[Operation] = set()
         running_tasks: Set[asyncio.Task] = set()
+
+        total_ops = len(self.graph.operations)
 
         # Find initial roots that are ready to run
         ready_to_run = [op for op in self.graph.operations if op.can_be_executed()]
@@ -81,6 +91,18 @@ class AsyncController(Controller):
             for task in done:
                 completed_op = await task
                 completed_operations.add(completed_op)
+
+                # Emit progress so clients can reset their request timeout on
+                # long-running graphs.
+                if progress_callback is not None:
+                    try:
+                        result = progress_callback(
+                            len(completed_operations), total_ops, completed_op
+                        )
+                        if asyncio.iscoroutine(result):
+                            await result
+                    except Exception:  # pragma: no cover - progress is best-effort
+                        self.logger.debug("progress_callback failed", exc_info=True)
 
                 # Check successors of the completed operation
                 for successor in completed_op.successors:

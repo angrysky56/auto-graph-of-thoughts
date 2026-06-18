@@ -82,6 +82,33 @@ incoherence; the Pareto frontier keeps genuinely different good answers rather
 than collapsing to one. (Novelty method credited in-code to the ACL 2026
 creativity-evaluation paper; implementation is original and API-only.)
 
+### Deeper pipeline (concurrent, set-level) — preferred
+
+The simple ops above judge candidates one at a time, which is a weak signal and
+can time out (many serial calls). These three are async, parallelise their LLM
+calls, and judge at the **set** level. Prefer them for real creative work.
+
+- `divergent_generate` — explore/commit generator. Samples `k` candidates
+  **concurrently**, clusters them in a single call, scores set-level novelty +
+  entropy, and if the set collapsed onto one idea, **raises temperature and
+  re-samples** (controller loop) before committing. Params: `k`, `max_rounds`,
+  `base_temperature`, `temperature_step`, `diversity_threshold`. Fixes both the
+  provider `n`-fan-out limit and mode collapse. Needs a `generate` template.
+- `comparative_score` — scores all candidates **relative to each other in ONE
+  call** (params: `criteria`, `scale`) → `_quality`. Stronger than per-candidate
+  rubric, and one call instead of N.
+- `multi_persona_judge` — final judge: several critic personas vote per
+  criterion **concurrently**, aggregated by majority → `_quality` (params:
+  `criteria`, `personas`). A self-contained stand-in for the paper's
+  retrieval-based multi-agent judge (no embedding store).
+
+**Preferred creative shape:** `divergent_generate → comparative_score →
+keep_pareto → multi_persona_judge → improve`. Runnable example:
+[`examples/custom_tasks/creative_selection.json`](../../../examples/custom_tasks/creative_selection.json).
+
+Note: per-call cold judging needs the `temperature` override on the LM `query`
+(present in this repo's `OpenRouter`/`ChatGPT`); older backends degrade silently.
+
 ## Server-side: stateless one-shot (`execute_got_graph`)
 
 ```jsonc

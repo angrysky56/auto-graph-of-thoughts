@@ -9,7 +9,8 @@
         "python",
         "-m",
         "graph_of_thoughts.mcp_server"
-      ]
+      ],
+      "timeout": 600000
     }
   }
 }
